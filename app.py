@@ -910,7 +910,7 @@ def login_page():
     col1, col2, col3 = st.columns([1, 1, 1])
     with col2:
         st.markdown("<br><br><br>", unsafe_allow_html=True)
-        st.markdown("## B2B Login System")
+        st.markdown("## Bluebulous B2B 採購系統")
         with st.form("login"):
             u = st.text_input("Username / Email")
             p = st.text_input("Password", type="password")
