@@ -11,7 +11,6 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 # --- 1. 系統設定 ---
-# --- 1. 系統設定 ---
 st.set_page_config(
     page_title="Bluebulous B2B",
     layout="wide",
@@ -137,6 +136,35 @@ st.markdown(
     .badge-done { background-color: #2c3e50; }
     .badge-unpaid { background-color: #c0392b; }
 
+    /* === 📱 手機版專用優化 (電腦版不會吃到這段設定) === */
+    @media only screen and (max-width: 768px) {
+        
+        /* 1. 只有手機版：縮小留白，讓畫面變寬 */
+        .block-container {
+            padding-top: 1rem !important;
+            padding-bottom: 5rem !important; /* 底部留多一點，防止被手機瀏覽器選單擋住 */
+            padding-left: 0.5rem !important;
+            padding-right: 0.5rem !important;
+        }
+        
+        /* 2. 只有手機版：調整欄位間距，避免文字擠成一團 */
+        div[data-testid="column"] {
+            padding: 0px 2px !important;
+            min-width: 0px !important; /* 允許欄位縮得更小 */
+        }
+        
+        /* 3. 只有手機版：按鈕稍微變高一點，比較好按 */
+        div.stButton > button {
+            min-height: 45px !important;
+            padding-left: 5px !important;
+            padding-right: 5px !important;
+        }
+
+        /* 4. 只有手機版：字體稍微縮小一點點，避免折行太嚴重 */
+        p, .stMarkdown, div[data-testid="stText"] {
+            font-size: 14px !important;
+        }
+    }
     </style>
     """,
     unsafe_allow_html=True
@@ -202,12 +230,11 @@ def convert_drive_url(url):
     except Exception:
         return None
 
-    # 3. 使用 Google Drive Thumbnail API (這是目前最穩定的方法)
-    # sz=w1000 代表要求寬度 1000px 的圖片 (足夠清晰且讀取快)
+    # 3. 使用 Google Drive Thumbnail API
     if file_id:
         return f"https://drive.google.com/thumbnail?id={file_id}&sz=w1000"
     
-    # 非 Google Drive 連結則直接回傳
+    # 非 Google Drive 連結 (如 Imgur, GitHub Raw) 則直接回傳
     return url if url.startswith('http') else None
 
 def display_status_badges(status_str):
@@ -349,12 +376,23 @@ def main_app(user):
         st.session_state.current_product_name = df_products['Name'].unique()[0]
 
     with st.sidebar:
-        logo_url = "https://drive.google.com/thumbnail?id=1xEKeBkFQqCvdQa4Vl-Hp9TB_7q2PDN2e&sz=w1000"
+        logo_url = "https://raw.githubusercontent.com/Bluebulous/product-images/main/Bluebulous%20logo.jpg"
         st.image(logo_url, use_container_width=True)
         st.markdown("<h3 style='text-align: center; color: #ffffff; margin-top: -10px;'>B2B採購系統 (Beta版)</h3>", unsafe_allow_html=True)
         st.divider()
         st.markdown(f"### Hello, {user['Contact_Person']}")
         st.caption(f"單位: {user['Dealer_Name']}")
+        st.divider()
+        
+        # [新增] 手機版救星：側邊欄購物車摘要
+        if st.session_state.cart:
+            total_qty = sum(item['qty'] for item in st.session_state.cart.values())
+            st.info(f"🛒 購物車內有 {total_qty} 件商品")
+            if st.button("前往結帳 (查看詳情)", type="primary", use_container_width=True):
+                 st.toast("請往下滑動查看完整購物車", icon="👇")
+        else:
+            st.caption("🛒 購物車是空的")
+            
         st.divider()
         
         if st.button("🔄 重整產品資料", use_container_width=True):
@@ -700,12 +738,14 @@ def main_app(user):
                 c1, c2, c3, c4, c5 = c_row.columns([1.2, 2.2, 1.5, 1.5, 1.5], vertical_alignment="center")
                 with c1: st.markdown(f"<div style='font-weight:bold;'>{sku['Size']}</div>", unsafe_allow_html=True)
                 with c2:
-                    qty_key = f"qty_input_{sku['Product_ID']}"
+                    # [修正] Key 加入顏色參數，防止重複 Key 錯誤
+                    qty_key = f"qty_input_{sku['Product_ID']}_{selected_color}"
                     st.number_input("Qty", min_value=1, value=1, step=1, key=qty_key, label_visibility="collapsed")
                 with c3: st.markdown(f"<div style='color:#ff5500; font-weight:bold;'>${int(sku['Wholesale_Price'])}</div>", unsafe_allow_html=True)
                 with c4: st.markdown(f"<div style='color:#666;'>${int(sku['Retail_Price'])}</div>", unsafe_allow_html=True)
                 with c5:
-                    st.button("ADD", key=f"add_{sku['Product_ID']}", type="primary", use_container_width=True,
+                    # [修正] Key 加入顏色參數
+                    st.button("ADD", key=f"add_{sku['Product_ID']}_{selected_color}", type="primary", use_container_width=True,
                         on_click=add_to_cart_callback,
                         args=(sku['Product_ID'], current_name, f"{selected_color} / {sku['Size']}", sku['Wholesale_Price'], sku['Retail_Price'], qty_key, current_product_data.iloc[0]['Brand']))
 
