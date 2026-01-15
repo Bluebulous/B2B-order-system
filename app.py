@@ -762,31 +762,22 @@ def main_app(user):
             current_category = current_product_data.iloc[0]['Category']
             same_category_products = df_products[df_products['Category'] == current_category]['Name'].unique()
             others = [p for p in same_category_products if p != current_name]
-            # ... (上面是 st.markdown 標題)
-
-            # [修改] 相關產品區塊 - 卡片式設計
             for i in range(0, len(others), 3):
                 cols = st.columns(3)
                 batch = others[i:i+3]
                 for idx, other_prod in enumerate(batch):
                     row = df_products[df_products['Name'] == other_prod].iloc[0]
                     thumb = convert_drive_url(row['Image_URL'])
-                    
                     with cols[idx]:
-                        # 使用 container 框住圖片與按鈕，讓它們看起來像一組
-                        with st.container(border=True):
-                            # 1. 顯示圖片
-                            if thumb: 
-                                st.image(thumb, use_container_width=True)
-                            else:
-                                # 如果沒有圖片，顯示一個佔位符，保持排版整齊
-                                st.markdown("<div style='height: 150px; background-color: #f0f0f0; display: flex; align-items: center; justify-content: center; color: #666;'>No Image</div>", unsafe_allow_html=True)
+                        if thumb: 
+                            st.image(thumb, use_container_width=True)
                             
-                            # 2. 顯示全寬按鈕 (看起來像是圖片的標題)
-                            # key 必須包含流水號 i 和 idx 以確保唯一性
-                            if st.button(other_prod, key=f"view_{other_prod}_{i}_{idx}", use_container_width=True):
+                            # [修改] 這裡改用產品名稱當按鈕，不再顯示 View
+                            if st.button(f" {other_prod}", key=f"view_{other_prod}_{i}_{idx}", use_container_width=True):
                                 st.session_state.current_product_name = other_prod
                                 st.rerun()
+                        # [移除] st.caption(other_prod) 已經不需要了
+            if not others: st.caption("此分類下無其他商品")
 
     with col_cart:
         with st.container(border=True):
