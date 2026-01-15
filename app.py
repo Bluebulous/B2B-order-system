@@ -376,7 +376,8 @@ def main_app(user):
         st.session_state.current_product_name = df_products['Name'].unique()[0]
 
     with st.sidebar:
-        logo_url = "https://raw.githubusercontent.com/Bluebulous/product-images/main/LOGO-white-01.png"
+        # 請記得把這裡改成您真正的側邊欄 Logo 網址
+        logo_url = "https://raw.githubusercontent.com/Bluebulous/product-images/main/Bluebulous%20logo.jpg"
         st.image(logo_url, use_container_width=True)
         st.markdown("<h3 style='text-align: center; color: #ffffff; margin-top: -10px;'>B2B採購系統 (Beta版)</h3>", unsafe_allow_html=True)
         st.divider()
@@ -770,10 +771,12 @@ def main_app(user):
                     with cols[idx]:
                         if thumb: 
                             st.image(thumb, use_container_width=True)
-                            if st.button("View", key=f"view_{other_prod}_{i}_{idx}", use_container_width=True):
+                            
+                            # [修改] 這裡改用產品名稱當按鈕，不再顯示 View
+                            if st.button(f"👉 {other_prod}", key=f"view_{other_prod}_{i}_{idx}", use_container_width=True):
                                 st.session_state.current_product_name = other_prod
                                 st.rerun()
-                        st.caption(other_prod)
+                        # [移除] st.caption(other_prod) 已經不需要了
             if not others: st.caption("此分類下無其他商品")
 
     with col_cart:
