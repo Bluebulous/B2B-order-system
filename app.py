@@ -699,15 +699,14 @@ def main_app(user):
                 except Exception as e: st.error(f"儲存失敗: {e}")
         return
 
-    # 3. 商店頁
+   # 3. 商店頁
     col_visual, col_select, col_cart = st.columns([1.8, 1.8, 1.4], gap="medium")
     current_name = st.session_state.current_product_name
     current_product_data = df_products[df_products['Name'] == current_name]
 
-   with col_select:
+    with col_select:
         with st.container(border=True):
-            # [修改] 使用 HTML 來設定精確的字體大小 (font-size)
-            # 您可以把 32px 改成任何您想要的大小
+            # [修改] 使用 HTML 來設定精確的字體大小 (font-size: 32px)
             st.markdown(f"<div style='font-size: 32px; font-weight: bold; margin-bottom: 10px;'>{current_name}</div>", unsafe_allow_html=True)
             
             st.caption(f"Brand: {current_product_data.iloc[0]['Brand']}")
@@ -737,19 +736,17 @@ def main_app(user):
                 st.toast(f"已加入 {p_name} x {qty}", icon="🛒")
                 st.session_state[q_key] = 1
 
-            for _, sku in variants.iterrows():
+            for i, (_, sku) in enumerate(variants.iterrows()):
                 c_row = st.container()
                 c1, c2, c3, c4, c5 = c_row.columns([1.2, 2.2, 1.5, 1.5, 1.5], vertical_alignment="center")
                 with c1: st.markdown(f"<div style='font-weight:bold;'>{sku['Size']}</div>", unsafe_allow_html=True)
                 with c2:
-                    # [修正] Key 加入顏色參數，防止重複 Key 錯誤
-                    qty_key = f"qty_input_{sku['Product_ID']}_{selected_color}"
+                    qty_key = f"qty_input_{sku['Product_ID']}_{selected_color}_{i}"
                     st.number_input("Qty", min_value=1, value=1, step=1, key=qty_key, label_visibility="collapsed")
                 with c3: st.markdown(f"<div style='color:#ff5500; font-weight:bold;'>${int(sku['Wholesale_Price'])}</div>", unsafe_allow_html=True)
                 with c4: st.markdown(f"<div style='color:#666;'>${int(sku['Retail_Price'])}</div>", unsafe_allow_html=True)
                 with c5:
-                    # [修正] Key 加入顏色參數
-                    st.button("ADD", key=f"add_{sku['Product_ID']}_{selected_color}", type="primary", use_container_width=True,
+                    st.button("ADD", key=f"add_{sku['Product_ID']}_{selected_color}_{i}", type="primary", use_container_width=True,
                         on_click=add_to_cart_callback,
                         args=(sku['Product_ID'], current_name, f"{selected_color} / {sku['Size']}", sku['Wholesale_Price'], sku['Retail_Price'], qty_key, current_product_data.iloc[0]['Brand']))
 
