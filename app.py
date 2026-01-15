@@ -704,9 +704,12 @@ def main_app(user):
     current_name = st.session_state.current_product_name
     current_product_data = df_products[df_products['Name'] == current_name]
 
-    with col_select:
+   with col_select:
         with st.container(border=True):
-            st.markdown(f"## {current_name}")
+            # [修改] 使用 HTML 來設定精確的字體大小 (font-size)
+            # 您可以把 32px 改成任何您想要的大小
+            st.markdown(f"<div style='font-size: 32px; font-weight: bold; margin-bottom: 10px;'>{current_name}</div>", unsafe_allow_html=True)
+            
             st.caption(f"Brand: {current_product_data.iloc[0]['Brand']}")
             st.markdown("---")
             available_colors = current_product_data['Color'].unique()
