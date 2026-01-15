@@ -77,7 +77,7 @@ st.markdown(
         color: #000000 !important;
     }
     
-    /* 6. 按鈕樣式 */
+    /* 6. 按鈕樣式 (側邊欄) */
     section[data-testid="stSidebar"] button {
         background-color: transparent !important;
         color: #cccccc !important;
@@ -93,7 +93,16 @@ st.markdown(
         background-color: #2b2b2b !important;
     }
     
-    /* 購物車小按鈕 */
+    /* 7. [新增] 調整卡片內一般按鈕文字大小 (影響同系列商品按鈕) */
+    div[data-testid="stVerticalBlockBorderWrapper"] button p {
+        font-size: 16px !important; /* 這裡控制同系列商品按鈕文字大小 */
+        font-weight: bold !important;
+    }
+    
+    /* 購物車小按鈕 (保持較大字體以顯示符號) */
+    div[data-testid="stVerticalBlockBorderWrapper"] button[kind="secondary"] p {
+         font-size: 20px !important;
+    }
     div[data-testid="stVerticalBlockBorderWrapper"] button[kind="secondary"] {
         color: #000000 !important;
         background-color: #ffffff !important; 
@@ -101,8 +110,7 @@ st.markdown(
         box-shadow: none !important;
         padding: 0px !important;
         width: 30px !important;        
-        height: 30px !important;
-        font-size: 24px !important;    
+        height: 30px !important;  
     }
     div[data-testid="stVerticalBlockBorderWrapper"] button[kind="secondary"]:hover {
         color: #ff5500 !important;
@@ -699,7 +707,7 @@ def main_app(user):
                 except Exception as e: st.error(f"儲存失敗: {e}")
         return
 
-   # 3. 商店頁
+    # 3. 商店頁
     col_visual, col_select, col_cart = st.columns([1.8, 1.8, 1.4], gap="medium")
     current_name = st.session_state.current_product_name
     current_product_data = df_products[df_products['Name'] == current_name]
@@ -769,19 +777,22 @@ def main_app(user):
                     row = df_products[df_products['Name'] == other_prod].iloc[0]
                     thumb = convert_drive_url(row['Image_URL'])
                     with cols[idx]:
-                        if thumb: 
-                            st.image(thumb, use_container_width=True)
+                        with st.container(border=True):
+                            if thumb: 
+                                st.image(thumb, use_container_width=True)
+                            else:
+                                st.markdown("<div style='height: 150px; background-color: #f0f0f0; display: flex; align-items: center; justify-content: center; color: #666;'>No Image</div>", unsafe_allow_html=True)
                             
-                            # [修改] 這裡改用產品名稱當按鈕，不再顯示 View
+                            # [修改] 這裡的按鈕字體大小已經透過上方的 CSS 設定變大了 (16px)
                             if st.button(f" {other_prod}", key=f"view_{other_prod}_{i}_{idx}", use_container_width=True):
                                 st.session_state.current_product_name = other_prod
                                 st.rerun()
-                        # [移除] st.caption(other_prod) 已經不需要了
             if not others: st.caption("此分類下無其他商品")
 
     with col_cart:
         with st.container(border=True):
-            st.markdown("### 🛒 購物車")
+            # [修改] 購物車標題字體大小設定 (26px)
+            st.markdown("<h3 style='font-size: 26px; font-weight: bold;'>🛒 購物車</h3>", unsafe_allow_html=True)
             st.divider()
             if st.session_state.cart:
                 BRAND_RULES, _ = get_brand_rules()
@@ -954,6 +965,8 @@ def login_page():
     with col2:
         st.markdown("<br><br><br>", unsafe_allow_html=True)
         st.markdown("## Bluebulous B2B 採購系統")
+        # [新增] 登入頁面提示
+        st.warning("💡 建議使用 筆電 / 桌機 登入以獲得最佳體驗")
         with st.form("login"):
             u = st.text_input("Username / Email")
             p = st.text_input("Password", type="password")
