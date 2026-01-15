@@ -95,7 +95,7 @@ st.markdown(
     
     /* 7. [新增] 調整卡片內一般按鈕文字大小 (影響同系列商品按鈕) */
     div[data-testid="stVerticalBlockBorderWrapper"] button p {
-        font-size: 16px !important; /* 這裡控制同系列商品按鈕文字大小 */
+        font-size: 12px !important; /* 這裡控制同系列商品按鈕文字大小 */
         font-weight: bold !important;
     }
     
@@ -791,8 +791,8 @@ def main_app(user):
 
     with col_cart:
         with st.container(border=True):
-            # [修改] 購物車標題字體大小設定 (26px)
-            st.markdown("<h3 style='font-size: 26px; font-weight: bold;'>🛒 購物車</h3>", unsafe_allow_html=True)
+            # [修改] 購物車標題字體大小設定 (20px)
+            st.markdown("<h3 style='font-size: 20px; font-weight: bold;'>🛒 購物車</h3>", unsafe_allow_html=True)
             st.divider()
             if st.session_state.cart:
                 BRAND_RULES, _ = get_brand_rules()
