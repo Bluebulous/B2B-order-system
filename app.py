@@ -376,7 +376,7 @@ def main_app(user):
         st.session_state.current_product_name = df_products['Name'].unique()[0]
 
     with st.sidebar:
-        logo_url = "https://raw.githubusercontent.com/Bluebulous/product-images/main/Bluebulous%20logo.jpg"
+        logo_url = "https://raw.githubusercontent.com/Bluebulous/product-images/main/LOGO-white-01.png"
         st.image(logo_url, use_container_width=True)
         st.markdown("<h3 style='text-align: center; color: #ffffff; margin-top: -10px;'>B2B採購系統 (Beta版)</h3>", unsafe_allow_html=True)
         st.divider()
