@@ -706,8 +706,8 @@ def main_app(user):
 
     with col_select:
         with st.container(border=True):
-            # [修改] 使用 HTML 來設定精確的字體大小 (font-size: 26px)
-            st.markdown(f"<div style='font-size: 26px; font-weight: bold; margin-bottom: 10px;'>{current_name}</div>", unsafe_allow_html=True)
+            # [修改] 使用 HTML 來設定精確的字體大小 (font-size: 20px)
+            st.markdown(f"<div style='font-size: 20px; font-weight: bold; margin-bottom: 10px;'>{current_name}</div>", unsafe_allow_html=True)
             
             st.caption(f"Brand: {current_product_data.iloc[0]['Brand']}")
             st.markdown("---")
