@@ -94,53 +94,42 @@ st.markdown(
     }
     
     /* 7. [修改] 卡片內按鈕樣式 (產品名稱 & 購物車按鈕) - 移除框線與背景 */
-    
-    /* 針對所有白色卡片內的次要按鈕 (Secondary Buttons) */
     div[data-testid="stVerticalBlockBorderWrapper"] button[kind="secondary"] {
-        border: none !important;            /* 移除框線 */
-        background-color: transparent !important; /* 背景透明 */
-        box-shadow: none !important;        /* 移除陰影 */
-        padding: 2px 5px !important;        /* 縮小內距 */
+        border: none !important;            
+        background-color: transparent !important; 
+        box-shadow: none !important;        
+        padding: 2px 5px !important;        
     }
 
     /* 按鈕內的文字設定 */
     div[data-testid="stVerticalBlockBorderWrapper"] button[kind="secondary"] p {
-        color: #000000 !important;          /* 文字黑色 */
+        color: #000000 !important;          
         font-weight: bold !important;
-        font-size: 16px !important;         /* 預設字體大小 (影響產品名稱) */
+        font-size: 16px !important;         
     }
 
     /* 滑鼠移過時的效果 */
     div[data-testid="stVerticalBlockBorderWrapper"] button[kind="secondary"]:hover {
-        color: #ff5000 !important;          /* 橘色文字 */
-        background-color: transparent !important; /* 背景維持透明 */
+        color: #ff5000 !important;          
+        background-color: transparent !important; 
         border: none !important;
     }
     div[data-testid="stVerticalBlockBorderWrapper"] button[kind="secondary"]:hover p {
         color: #ff5000 !important;
     }
 
-    /* 購物車小按鈕的特別微調 (稍微放大符號以便點擊) */
+    /* 購物車小按鈕微調 */
     div[data-testid="stVerticalBlockBorderWrapper"] button[kind="secondary"] p:contains("▬▬"),
     div[data-testid="stVerticalBlockBorderWrapper"] button[kind="secondary"] p:contains("╋"),
     div[data-testid="stVerticalBlockBorderWrapper"] button[kind="secondary"] p:contains("✖") {
          font-size: 20px !important;
     }
     
-    /* 為了讓購物車按鈕好按一點，恢復一點寬度設定 */
     div[data-testid="stVerticalBlockBorderWrapper"] button[kind="secondary"]:not(:has(p:contains("Non-stop"))):not(:has(p:contains("Vegdog"))) {
-       /* 這邊稍微 tricky，因為 CSS 無法直接選取特定文字內容，
-          我們依靠上面的 padding 設定即可，這裡主要是確保購物車按鈕有足夠點擊區域 */
         min-width: 30px !important;        
     }
-    
-    /* 購物車按鈕 hover 加一點底色提示 (選用) */
-    /* div[data-testid="stVerticalBlockBorderWrapper"] button[kind="secondary"]:hover {
-        background-color: #f0f0f0 !important; 
-    } 
-    */
 
-    /* 主要按鈕 (ADD / CHECKOUT) - 這些按鈕要保留背景色與框線 */
+    /* 主要按鈕 (ADD / CHECKOUT) */
     button[kind="primary"] {
         background-color: #ff5500 !important;
         border: none !important;
@@ -172,31 +161,23 @@ st.markdown(
     .badge-done { background-color: #2c3e50; }
     .badge-unpaid { background-color: #c0392b; }
 
-    /* === 📱 手機版專用優化 (電腦版不會吃到這段設定) === */
+    /* === 📱 手機版專用優化 === */
     @media only screen and (max-width: 768px) {
-        
-        /* 1. 只有手機版：縮小留白，讓畫面變寬 */
         .block-container {
             padding-top: 1rem !important;
-            padding-bottom: 5rem !important; /* 底部留多一點，防止被手機瀏覽器選單擋住 */
+            padding-bottom: 5rem !important; 
             padding-left: 0.5rem !important;
             padding-right: 0.5rem !important;
         }
-        
-        /* 2. 只有手機版：調整欄位間距，避免文字擠成一團 */
         div[data-testid="column"] {
             padding: 0px 2px !important;
-            min-width: 0px !important; /* 允許欄位縮得更小 */
+            min-width: 0px !important; 
         }
-        
-        /* 3. 只有手機版：按鈕稍微變高一點，比較好按 */
         div.stButton > button {
             min-height: 45px !important;
             padding-left: 5px !important;
             padding-right: 5px !important;
         }
-
-        /* 4. 只有手機版：字體稍微縮小一點點，避免折行太嚴重 */
         p, .stMarkdown, div[data-testid="stText"] {
             font-size: 14px !important;
         }
@@ -246,31 +227,20 @@ def update_data(worksheet, df):
         get_brand_rules.clear()
 
 def convert_drive_url(url):
-    # 1. 基礎防呆
     if pd.isna(url) or not isinstance(url, str): 
         return None
-    
     url = url.strip()
-    
-    # 2. 嘗試解析 Google Drive ID
     file_id = None
-    
     try:
         if "drive.google.com" in url:
             if "/file/d/" in url:
-                # 格式: .../file/d/{FILE_ID}/view...
                 file_id = url.split('/file/d/')[1].split('/')[0]
             elif "id=" in url:
-                # 格式: ...?id={FILE_ID}...
                 file_id = url.split('id=')[1].split('&')[0]
     except Exception:
         return None
-
-    # 3. 使用 Google Drive Thumbnail API
     if file_id:
         return f"https://drive.google.com/thumbnail?id={file_id}&sz=w1000"
-    
-    # 非 Google Drive 連結 (如 Imgur, GitHub Raw) 則直接回傳
     return url if url.startswith('http') else None
 
 def display_status_badges(status_str):
@@ -308,7 +278,6 @@ def calculate_new_status(current_status, new_action_group, new_action_value):
             if p in G1_LOGISTICS: new_parts.append(p)
     return ", ".join(new_parts)
 
-# 寄送訂單確認信函式
 def send_order_email(order_data, cart_items, is_update=False):
     SMTP_SERVER = "smtp.gmail.com"
     SMTP_PORT = 587
@@ -405,16 +374,11 @@ def main_app(user):
         df_products['Wholesale_Price'] = pd.to_numeric(df_products['Wholesale_Price'], errors='coerce').fillna(0)
         df_products['Retail_Price'] = pd.to_numeric(df_products['Retail_Price'], errors='coerce').fillna(0)
         
-        # [新增] 品牌權限過濾邏輯
-        # 1. 從使用者資料中讀取 Allowed_Brands (需在 Google Sheet Users 分頁新增此欄位)
+        # [權限過濾] 
         allowed_brands_str = str(user.get('Allowed_Brands', ''))
-        
-        # 2. 如果欄位有值且不是空白
+        # 如果欄位有值且不是空白
         if pd.notna(allowed_brands_str) and allowed_brands_str.strip() != "" and allowed_brands_str.lower() != "nan":
-            # 3. 切割字串並去除空白 (支援逗號分隔)
             allowed_list = [b.strip() for b in allowed_brands_str.split(',') if b.strip()]
-            
-            # 4. 如果列表不為空且不包含 "All"，則進行過濾
             if allowed_list and "All" not in allowed_list:
                 df_products = df_products[df_products['Brand'].isin(allowed_list)]
                 
@@ -422,7 +386,7 @@ def main_app(user):
         st.error(f"無法讀取產品資料: {e}")
         return
 
-    # [防呆] 如果過濾後沒有產品，顯示提示並避免報錯
+    # [防呆] 如果過濾後沒有產品
     if df_products.empty:
         st.warning("⚠️ 目前沒有您有權限查看的產品，請聯繫管理員。")
         with st.sidebar:
@@ -434,11 +398,9 @@ def main_app(user):
     if 'current_product_name' not in st.session_state:
         st.session_state.current_product_name = df_products['Name'].unique()[0]
     elif st.session_state.current_product_name not in df_products['Name'].unique():
-        # 如果當前選中的產品不在權限內，強制跳回第一個產品
         st.session_state.current_product_name = df_products['Name'].unique()[0]
 
     with st.sidebar:
-        # 請記得把這裡改成您真正的側邊欄 Logo 網址
         logo_url = "https://raw.githubusercontent.com/Bluebulous/product-images/main/LOGO-white-01.png"
         st.image(logo_url, use_container_width=True)
         st.markdown("<h3 style='text-align: center; color: #ffffff; margin-top: -10px;'>B2B採購系統 (Beta版)</h3>", unsafe_allow_html=True)
@@ -447,7 +409,6 @@ def main_app(user):
         st.caption(f"單位: {user['Dealer_Name']}")
         st.divider()
         
-        # [新增] 手機版救星：側邊欄購物車摘要
         if st.session_state.cart:
             total_qty = sum(item['qty'] for item in st.session_state.cart.values())
             st.info(f"🛒 購物車內有 {total_qty} 件商品")
@@ -476,7 +437,8 @@ def main_app(user):
             st.rerun()
         if user['Username'] in ADMIN_USERS:
             st.markdown("---")
-            if st.button("🔧 訂單管理 (Admin)", use_container_width=True):
+            # [修改] 更改側欄按鈕名稱
+            if st.button("🔧 管理員後台", use_container_width=True):
                 st.session_state.page = 'admin_orders'
                 st.rerun()
         st.markdown("<br>", unsafe_allow_html=True)
@@ -504,7 +466,7 @@ def main_app(user):
                 if 'Tracking_Number' not in orders.columns: orders['Tracking_Number'] = ""
                 if 'Admin_Note' not in orders.columns: orders['Admin_Note'] = ""
                 if 'Extra_Discount' not in orders.columns: orders['Extra_Discount'] = 0 
-                orders['Extra_Discount'] = orders['Extra_Discount'].fillna(0).astype(int) # NaN轉0
+                orders['Extra_Discount'] = orders['Extra_Discount'].fillna(0).astype(int) 
 
                 my_orders = orders[orders['Email'] == user['Username']].sort_values("Order_Time", ascending=False)
                 
@@ -518,11 +480,9 @@ def main_app(user):
                             with c1:
                                 st.markdown(f"**訂單編號:** {row['Order_ID']}")
                                 st.markdown(f"**總金額:** ${row['Total']}")
-                                
                                 extra_disc = int(row.get('Extra_Discount', 0))
                                 if extra_disc > 0:
                                     st.markdown(f"<span style='color:green;'>**🎁 額外折扣:** -${extra_disc}</span>", unsafe_allow_html=True)
-
                                 if pd.notna(row['Tracking_Number']) and str(row['Tracking_Number']).strip() != "":
                                     st.info(f"📦 **物流單號:** {row['Tracking_Number']}")
                                 if pd.notna(row['Admin_Note']) and str(row['Admin_Note']).strip() != "":
@@ -587,19 +547,15 @@ def main_app(user):
             return
 
         st.title("🔧 管理員後台")
-        # [修改] 增加第三個 Tab：用戶權限管理
         tab1, tab2, tab3 = st.tabs(["📦 訂單管理", "⚙️ 品牌門檻設定", "👥 用戶權限管理"])
         
         with tab1:
             with st.container(border=True):
                 try:
                     orders = get_data("Orders")
-                    # [防呆補位]
                     if 'Tracking_Number' not in orders.columns: orders['Tracking_Number'] = ""
                     if 'Admin_Note' not in orders.columns: orders['Admin_Note'] = ""
                     if 'Extra_Discount' not in orders.columns: orders['Extra_Discount'] = 0
-                    
-                    # 強制處理 NaN
                     orders['Extra_Discount'] = orders['Extra_Discount'].fillna(0).astype(int)
 
                     if not orders.empty:
@@ -679,7 +635,6 @@ def main_app(user):
                                 
                                 st.divider()
                                 st.markdown("#### 🔄 更新訂單狀態")
-                                st.caption("點擊按鈕將會：1. 更新狀態(疊加) 2. 儲存上方資訊 3. 寄信通知客戶")
                                 
                                 g1_col, g2_col, g3_col = st.columns([3, 2, 1])
                                 
@@ -761,17 +716,17 @@ def main_app(user):
                     st.rerun()
                 except Exception as e: st.error(f"儲存失敗: {e}")
         
-        # [新增] Tab 3: 用戶權限管理
         with tab3:
             st.subheader("設定用戶可見品牌")
             st.info("💡 請在 'Allowed_Brands' 欄位輸入品牌名稱，用逗號分隔 (例如: Non-stop dogwear, Vegdog)。若要顯示全部請留空或輸入 All。")
             try:
                 users_df = get_data("Users")
-                # 確保 Allowed_Brands 欄位存在，若無則新增
                 if 'Allowed_Brands' not in users_df.columns:
                     users_df['Allowed_Brands'] = ""
                 
-                # 顯示可編輯的表格，隱藏密碼欄位以策安全
+                # [修正] 強制將 Allowed_Brands 轉為字串，避免 float/NaN 錯誤
+                users_df['Allowed_Brands'] = users_df['Allowed_Brands'].astype(str).replace('nan', '')
+
                 edited_users = st.data_editor(
                     users_df,
                     num_rows="dynamic",
@@ -783,7 +738,7 @@ def main_app(user):
                             help="輸入 All 代表全部可見，或是輸入品牌名稱如: Non-stop dogwear, Vegdog",
                             width="large"
                         ),
-                        "Password": st.column_config.TextColumn("Password", disabled=True) # 防止誤改密碼
+                        "Password": st.column_config.TextColumn("Password", disabled=True)
                     },
                     hide_index=True,
                     use_container_width=True,
@@ -807,9 +762,7 @@ def main_app(user):
 
     with col_select:
         with st.container(border=True):
-            # [修改] 使用 HTML 來設定精確的字體大小 (font-size: 20px)
             st.markdown(f"<div style='font-size: 20px; font-weight: bold; margin-bottom: 10px;'>{current_name}</div>", unsafe_allow_html=True)
-            
             st.caption(f"Brand: {current_product_data.iloc[0]['Brand']}")
             st.markdown("---")
             available_colors = current_product_data['Color'].unique()
@@ -876,7 +829,6 @@ def main_app(user):
                             else:
                                 st.markdown("<div style='height: 150px; background-color: #f0f0f0; display: flex; align-items: center; justify-content: center; color: #666;'>No Image</div>", unsafe_allow_html=True)
                             
-                            # [修改] 這裡的按鈕字體大小已經透過上方的 CSS 設定變大了 (16px)
                             if st.button(f" {other_prod}", key=f"view_{other_prod}_{i}_{idx}", use_container_width=True):
                                 st.session_state.current_product_name = other_prod
                                 st.rerun()
@@ -884,7 +836,6 @@ def main_app(user):
 
     with col_cart:
         with st.container(border=True):
-            # [修改] 購物車標題字體大小設定 (20px)
             st.markdown("<h3 style='font-size: 20px; font-weight: bold;'>🛒 購物車</h3>", unsafe_allow_html=True)
             st.divider()
             if st.session_state.cart:
@@ -1058,7 +1009,6 @@ def login_page():
     with col2:
         st.markdown("<br><br><br>", unsafe_allow_html=True)
         st.markdown("## Bluebulous B2B 採購系統")
-        # [新增] 登入頁面提示
         st.warning("💡 建議使用 筆電 / 桌機 登入以獲得最佳體驗")
         with st.form("login"):
             u = st.text_input("Username / Email")
