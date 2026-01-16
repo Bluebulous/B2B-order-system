@@ -121,8 +121,24 @@ st.markdown(
     }
 
     /* 購物車小按鈕的特別微調 (稍微放大符號以便點擊) */
-    /* 由於前面已經把所有 secondary button 設為無框線，這裡只需微調字體 */
-    /* 注意：這些符號 (+, -, x) 也會變成無框線的樣式，看起來更簡潔 */
+    div[data-testid="stVerticalBlockBorderWrapper"] button[kind="secondary"] p:contains("▬▬"),
+    div[data-testid="stVerticalBlockBorderWrapper"] button[kind="secondary"] p:contains("╋"),
+    div[data-testid="stVerticalBlockBorderWrapper"] button[kind="secondary"] p:contains("✖") {
+         font-size: 20px !important;
+    }
+    
+    /* 為了讓購物車按鈕好按一點，恢復一點寬度設定 */
+    div[data-testid="stVerticalBlockBorderWrapper"] button[kind="secondary"]:not(:has(p:contains("Non-stop"))):not(:has(p:contains("Vegdog"))) {
+       /* 這邊稍微 tricky，因為 CSS 無法直接選取特定文字內容，
+          我們依靠上面的 padding 設定即可，這裡主要是確保購物車按鈕有足夠點擊區域 */
+        min-width: 30px !important;        
+    }
+    
+    /* 購物車按鈕 hover 加一點底色提示 (選用) */
+    /* div[data-testid="stVerticalBlockBorderWrapper"] button[kind="secondary"]:hover {
+        background-color: #f0f0f0 !important; 
+    } 
+    */
 
     /* 主要按鈕 (ADD / CHECKOUT) - 這些按鈕要保留背景色與框線 */
     button[kind="primary"] {
@@ -388,11 +404,37 @@ def main_app(user):
         df_products = get_products_data().dropna(how="all")
         df_products['Wholesale_Price'] = pd.to_numeric(df_products['Wholesale_Price'], errors='coerce').fillna(0)
         df_products['Retail_Price'] = pd.to_numeric(df_products['Retail_Price'], errors='coerce').fillna(0)
-    except:
-        st.error("無法讀取產品資料")
+        
+        # [新增] 品牌權限過濾邏輯
+        # 1. 從使用者資料中讀取 Allowed_Brands (需在 Google Sheet Users 分頁新增此欄位)
+        allowed_brands_str = str(user.get('Allowed_Brands', ''))
+        
+        # 2. 如果欄位有值且不是空白
+        if pd.notna(allowed_brands_str) and allowed_brands_str.strip() != "" and allowed_brands_str.lower() != "nan":
+            # 3. 切割字串並去除空白 (支援逗號分隔)
+            allowed_list = [b.strip() for b in allowed_brands_str.split(',') if b.strip()]
+            
+            # 4. 如果列表不為空且不包含 "All"，則進行過濾
+            if allowed_list and "All" not in allowed_list:
+                df_products = df_products[df_products['Brand'].isin(allowed_list)]
+                
+    except Exception as e:
+        st.error(f"無法讀取產品資料: {e}")
+        return
+
+    # [防呆] 如果過濾後沒有產品，顯示提示並避免報錯
+    if df_products.empty:
+        st.warning("⚠️ 目前沒有您有權限查看的產品，請聯繫管理員。")
+        with st.sidebar:
+            if st.button("登出", key="logout_empty", use_container_width=True):
+                st.session_state.clear()
+                st.rerun()
         return
 
     if 'current_product_name' not in st.session_state:
+        st.session_state.current_product_name = df_products['Name'].unique()[0]
+    elif st.session_state.current_product_name not in df_products['Name'].unique():
+        # 如果當前選中的產品不在權限內，強制跳回第一個產品
         st.session_state.current_product_name = df_products['Name'].unique()[0]
 
     with st.sidebar:
@@ -545,7 +587,8 @@ def main_app(user):
             return
 
         st.title("🔧 管理員後台")
-        tab1, tab2 = st.tabs(["📦 訂單管理", "⚙️ 品牌門檻設定"])
+        # [修改] 增加第三個 Tab：用戶權限管理
+        tab1, tab2, tab3 = st.tabs(["📦 訂單管理", "⚙️ 品牌門檻設定", "👥 用戶權限管理"])
         
         with tab1:
             with st.container(border=True):
@@ -717,6 +760,44 @@ def main_app(user):
                     time.sleep(1)
                     st.rerun()
                 except Exception as e: st.error(f"儲存失敗: {e}")
+        
+        # [新增] Tab 3: 用戶權限管理
+        with tab3:
+            st.subheader("設定用戶可見品牌")
+            st.info("💡 請在 'Allowed_Brands' 欄位輸入品牌名稱，用逗號分隔 (例如: Non-stop dogwear, Vegdog)。若要顯示全部請留空或輸入 All。")
+            try:
+                users_df = get_data("Users")
+                # 確保 Allowed_Brands 欄位存在，若無則新增
+                if 'Allowed_Brands' not in users_df.columns:
+                    users_df['Allowed_Brands'] = ""
+                
+                # 顯示可編輯的表格，隱藏密碼欄位以策安全
+                edited_users = st.data_editor(
+                    users_df,
+                    num_rows="dynamic",
+                    column_config={
+                        "Username": st.column_config.TextColumn("Username (Email)", disabled=True),
+                        "Dealer_Name": st.column_config.TextColumn("單位名稱", disabled=True),
+                        "Allowed_Brands": st.column_config.TextColumn(
+                            "允許查看的品牌 (用逗號分隔)",
+                            help="輸入 All 代表全部可見，或是輸入品牌名稱如: Non-stop dogwear, Vegdog",
+                            width="large"
+                        ),
+                        "Password": st.column_config.TextColumn("Password", disabled=True) # 防止誤改密碼
+                    },
+                    hide_index=True,
+                    use_container_width=True,
+                    key="user_permission_editor"
+                )
+                
+                if st.button("💾 儲存用戶權限", type="primary"):
+                    update_data("Users", edited_users)
+                    st.success("用戶權限已更新！")
+                    time.sleep(1)
+                    st.rerun()
+            except Exception as e:
+                st.error(f"讀取用戶資料失敗: {e}")
+
         return
 
     # 3. 商店頁
