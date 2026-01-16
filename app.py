@@ -95,7 +95,7 @@ st.markdown(
     
     /* 7. [新增] 調整卡片內一般按鈕文字大小 (影響同系列商品按鈕) */
     div[data-testid="stVerticalBlockBorderWrapper"] button p {
-        font-size: 12px !important; /* 這裡控制同系列商品按鈕文字大小 */
+        font-size: 10px !important; /* 這裡控制同系列商品按鈕文字大小 */
         font-weight: bold !important;
     }
     
@@ -385,7 +385,7 @@ def main_app(user):
 
     with st.sidebar:
         # 請記得把這裡改成您真正的側邊欄 Logo 網址
-        logo_url = "https://raw.githubusercontent.com/Bluebulous/product-images/main/Bluebulous%20logo.jpg"
+        logo_url = "https://raw.githubusercontent.com/Bluebulous/product-images/main/LOGO-white-01.png"
         st.image(logo_url, use_container_width=True)
         st.markdown("<h3 style='text-align: center; color: #ffffff; margin-top: -10px;'>B2B採購系統 (Beta版)</h3>", unsafe_allow_html=True)
         st.divider()
