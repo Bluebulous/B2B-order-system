@@ -93,36 +93,48 @@ st.markdown(
         background-color: #2b2b2b !important;
     }
     
-    /* 7. [新增] 調整卡片內一般按鈕文字大小 (影響同系列商品按鈕) */
-    div[data-testid="stVerticalBlockBorderWrapper"] button p {
-        font-size: 10px !important; /* 這裡控制同系列商品按鈕文字大小 */
-        font-weight: bold !important;
-    }
+    /* 7. [修改] 卡片內按鈕樣式 (產品名稱 & 購物車按鈕) - 移除框線與背景 */
     
-    /* 購物車小按鈕 (保持較大字體以顯示符號) */
-    div[data-testid="stVerticalBlockBorderWrapper"] button[kind="secondary"] p {
-         font-size: 20px !important;
-    }
+    /* 針對所有白色卡片內的次要按鈕 (Secondary Buttons) */
     div[data-testid="stVerticalBlockBorderWrapper"] button[kind="secondary"] {
-        color: #000000 !important;
-        background-color: #ffffff !important; 
-        border: none !important;
-        box-shadow: none !important;
-        padding: 0px !important;
-        width: 30px !important;        
-        height: 30px !important;  
-    }
-    div[data-testid="stVerticalBlockBorderWrapper"] button[kind="secondary"]:hover {
-        color: #ff5500 !important;
-        background-color: #f9f9f9 !important; 
+        border: none !important;            /* 移除框線 */
+        background-color: transparent !important; /* 背景透明 */
+        box-shadow: none !important;        /* 移除陰影 */
+        padding: 2px 5px !important;        /* 縮小內距 */
     }
 
-    /* 主要按鈕 (ADD / CHECKOUT) */
+    /* 按鈕內的文字設定 */
+    div[data-testid="stVerticalBlockBorderWrapper"] button[kind="secondary"] p {
+        color: #000000 !important;          /* 文字黑色 */
+        font-weight: bold !important;
+        font-size: 16px !important;         /* 預設字體大小 (影響產品名稱) */
+    }
+
+    /* 滑鼠移過時的效果 */
+    div[data-testid="stVerticalBlockBorderWrapper"] button[kind="secondary"]:hover {
+        color: #ff5000 !important;          /* 橘色文字 */
+        background-color: transparent !important; /* 背景維持透明 */
+        border: none !important;
+    }
+    div[data-testid="stVerticalBlockBorderWrapper"] button[kind="secondary"]:hover p {
+        color: #ff5000 !important;
+    }
+
+    /* 購物車小按鈕的特別微調 (稍微放大符號以便點擊) */
+    /* 由於前面已經把所有 secondary button 設為無框線，這裡只需微調字體 */
+    /* 注意：這些符號 (+, -, x) 也會變成無框線的樣式，看起來更簡潔 */
+
+    /* 主要按鈕 (ADD / CHECKOUT) - 這些按鈕要保留背景色與框線 */
     button[kind="primary"] {
         background-color: #ff5500 !important;
         border: none !important;
         color: white !important;
         font-weight: bold;
+        box-shadow: 0px 2px 5px rgba(0,0,0,0.2) !important;
+    }
+    button[kind="primary"]:hover {
+        background-color: #e04a00 !important;
+        color: white !important;
     }
     button[kind="primary"] p {
         color: white !important; 
