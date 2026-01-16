@@ -93,7 +93,7 @@ st.markdown(
         background-color: #2b2b2b !important;
     }
     
-    /* 7. [修改] 卡片內按鈕樣式 (產品名稱 & 購物車按鈕) - 移除框線與背景 */
+    /* 7. 卡片內按鈕樣式 (產品名稱 & 購物車按鈕) */
     div[data-testid="stVerticalBlockBorderWrapper"] button[kind="secondary"] {
         border: none !important;            
         background-color: transparent !important; 
@@ -376,7 +376,6 @@ def main_app(user):
         
         # [權限過濾] 
         allowed_brands_str = str(user.get('Allowed_Brands', ''))
-        # 如果欄位有值且不是空白
         if pd.notna(allowed_brands_str) and allowed_brands_str.strip() != "" and allowed_brands_str.lower() != "nan":
             allowed_list = [b.strip() for b in allowed_brands_str.split(',') if b.strip()]
             if allowed_list and "All" not in allowed_list:
@@ -437,7 +436,6 @@ def main_app(user):
             st.rerun()
         if user['Username'] in ADMIN_USERS:
             st.markdown("---")
-            # [修改] 更改側欄按鈕名稱
             if st.button("🔧 管理員後台", use_container_width=True):
                 st.session_state.page = 'admin_orders'
                 st.rerun()
@@ -462,7 +460,6 @@ def main_app(user):
         with st.container(border=True):
             try:
                 orders = get_data("Orders")
-                # [防呆補位]
                 if 'Tracking_Number' not in orders.columns: orders['Tracking_Number'] = ""
                 if 'Admin_Note' not in orders.columns: orders['Admin_Note'] = ""
                 if 'Extra_Discount' not in orders.columns: orders['Extra_Discount'] = 0 
@@ -499,43 +496,6 @@ def main_app(user):
                     st.info("目前沒有訂單紀錄")
             except Exception as e:
                 st.error(f"讀取失敗: {e}")
-        return
-
-    # 2. 個人資料頁
-    if st.session_state.page == 'profile':
-        st.title("個人資料")
-        with st.container(border=True):
-            st.markdown(f"**單位:** {user['Dealer_Name']}")
-            st.markdown(f"**聯絡人:** {user['Contact_Person']}")
-            st.markdown(f"**Email:** {user['Username']}")
-            st.markdown(f"**電話:** {user['Phone']}")
-            st.markdown(f"**地址:** {user['Address']}")
-        st.markdown("<br>", unsafe_allow_html=True)
-        with st.container(border=True):
-            st.subheader("🔒 修改密碼")
-            with st.form("change_password_form"):
-                current_pwd = st.text_input("目前密碼", type="password")
-                new_pwd = st.text_input("新密碼", type="password")
-                confirm_pwd = st.text_input("確認新密碼", type="password")
-                if st.form_submit_button("更新密碼", type="primary", use_container_width=True):
-                    if str(current_pwd) != str(user['Password']):
-                        st.error("❌ 目前密碼輸入錯誤")
-                    elif new_pwd != confirm_pwd:
-                        st.error("❌ 兩次新密碼輸入不一致")
-                    elif not new_pwd:
-                        st.error("❌ 新密碼不得為空")
-                    else:
-                        try:
-                            users_df = get_data("Users")
-                            user_index = users_df[users_df['Username'] == user['Username']].index
-                            if not user_index.empty:
-                                idx = user_index[0]
-                                users_df.at[idx, 'Password'] = new_pwd
-                                update_data("Users", users_df)
-                                st.session_state['user']['Password'] = new_pwd
-                                st.success("✅ 密碼修改成功！")
-                            else: st.error("❌ 找不到使用者資料")
-                        except Exception as e: st.error(f"❌ 更新失敗: {e}")
         return
 
     # 4. 管理員後台
@@ -716,40 +676,84 @@ def main_app(user):
                     st.rerun()
                 except Exception as e: st.error(f"儲存失敗: {e}")
         
+        # [Tab 3 改寫] 新版：使用多選選單介面
         with tab3:
-            st.subheader("設定用戶可見品牌")
-            st.info("💡 請在 'Allowed_Brands' 欄位輸入品牌名稱，用逗號分隔 (例如: Non-stop dogwear, Vegdog)。若要顯示全部請留空或輸入 All。")
+            st.subheader("👥 用戶權限管理")
+            
+            # 1. 取得所有品牌 (從產品表自動抓取)
+            try:
+                all_brands_list = sorted(get_products_data()['Brand'].dropna().unique().tolist())
+            except:
+                all_brands_list = []
+
+            # 2. 讀取用戶資料
             try:
                 users_df = get_data("Users")
                 if 'Allowed_Brands' not in users_df.columns:
                     users_df['Allowed_Brands'] = ""
-                
-                # [修正] 強制將 Allowed_Brands 轉為字串，避免 float/NaN 錯誤
+                # 強制轉字串
                 users_df['Allowed_Brands'] = users_df['Allowed_Brands'].astype(str).replace('nan', '')
 
-                edited_users = st.data_editor(
-                    users_df,
-                    num_rows="dynamic",
-                    column_config={
-                        "Username": st.column_config.TextColumn("Username (Email)", disabled=True),
-                        "Dealer_Name": st.column_config.TextColumn("單位名稱", disabled=True),
-                        "Allowed_Brands": st.column_config.TextColumn(
-                            "允許查看的品牌 (用逗號分隔)",
-                            help="輸入 All 代表全部可見，或是輸入品牌名稱如: Non-stop dogwear, Vegdog",
-                            width="large"
-                        ),
-                        "Password": st.column_config.TextColumn("Password", disabled=True)
-                    },
-                    hide_index=True,
-                    use_container_width=True,
-                    key="user_permission_editor"
+                # 3. 顯示目前列表 (唯讀)
+                st.markdown("##### 目前權限總覽")
+                st.dataframe(
+                    users_df[['Username', 'Dealer_Name', 'Allowed_Brands']], 
+                    use_container_width=True, 
+                    hide_index=True
                 )
                 
-                if st.button("💾 儲存用戶權限", type="primary"):
-                    update_data("Users", edited_users)
-                    st.success("用戶權限已更新！")
-                    time.sleep(1)
-                    st.rerun()
+                st.divider()
+                st.markdown("##### ✏️ 修改權限 (自動抓取品牌列表)")
+                
+                c_edit_1, c_edit_2 = st.columns([1, 2])
+                
+                with c_edit_1:
+                    target_user = st.selectbox("選擇要修改的用戶", users_df['Username'].unique())
+                
+                # 抓取該用戶目前的設定
+                current_row = users_df[users_df['Username'] == target_user].iloc[0]
+                current_setting = str(current_row['Allowed_Brands'])
+                
+                # 判斷目前是否為 "All"
+                is_all = (current_setting == "" or "all" in current_setting.lower())
+                
+                # 解析目前已有的品牌 (給 Multiselect 當預設值)
+                default_selected = []
+                if not is_all:
+                    saved_list = [x.strip() for x in current_setting.split(',')]
+                    # 只保留目前仍然存在的品牌
+                    default_selected = [x for x in saved_list if x in all_brands_list]
+
+                with c_edit_2:
+                    allow_all = st.checkbox("✅ 開放所有品牌權限 (All)", value=is_all)
+                    
+                    if not allow_all:
+                        selected_brands = st.multiselect(
+                            "請勾選允許的品牌：", 
+                            options=all_brands_list,
+                            default=default_selected
+                        )
+                    else:
+                        st.info("ℹ️ 已選擇開放所有品牌，下方選單無須選擇。")
+                        selected_brands = []
+
+                if st.button("💾 更新該用戶權限", type="primary"):
+                    try:
+                        if allow_all:
+                            final_str = "All"
+                        else:
+                            final_str = ", ".join(selected_brands)
+                        
+                        idx = users_df[users_df['Username'] == target_user].index[0]
+                        users_df.at[idx, 'Allowed_Brands'] = final_str
+                        
+                        update_data("Users", users_df)
+                        st.success(f"✅ 用戶 {target_user} 的權限已更新為: {final_str}")
+                        time.sleep(1)
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"更新失敗: {e}")
+
             except Exception as e:
                 st.error(f"讀取用戶資料失敗: {e}")
 
