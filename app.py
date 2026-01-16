@@ -101,14 +101,12 @@ st.markdown(
         padding: 2px 5px !important;        
     }
 
-    /* 按鈕內的文字設定 */
     div[data-testid="stVerticalBlockBorderWrapper"] button[kind="secondary"] p {
         color: #000000 !important;          
         font-weight: bold !important;
         font-size: 16px !important;         
     }
 
-    /* 滑鼠移過時的效果 */
     div[data-testid="stVerticalBlockBorderWrapper"] button[kind="secondary"]:hover {
         color: #ff5000 !important;          
         background-color: transparent !important; 
@@ -213,9 +211,9 @@ def get_brand_rules():
         default_df = pd.DataFrame([{"Brand": "default", "Wholesale_Threshold": 10000, "Shipping_Threshold": 10000, "Discount": 0.7}])
         return {"default": {"wholesale_threshold": 10000, "shipping_threshold": 10000, "discount_rate": 0.7}}, default_df
 
-def get_data(worksheet):
+def get_data(worksheet, ttl=0): # 預設不快取，確保最新
     try:
-        return conn.read(spreadsheet=SHEET_URL, worksheet=worksheet, ttl=0)
+        return conn.read(spreadsheet=SHEET_URL, worksheet=worksheet, ttl=ttl)
     except:
         return pd.DataFrame()
 
@@ -676,7 +674,7 @@ def main_app(user):
                     st.rerun()
                 except Exception as e: st.error(f"儲存失敗: {e}")
         
-        # [Tab 3 改寫] 新版：使用多選選單介面
+        # [Tab 3 改寫] 新版：使用多選選單介面，並防呆處理
         with tab3:
             st.subheader("👥 用戶權限管理")
             
@@ -686,73 +684,85 @@ def main_app(user):
             except:
                 all_brands_list = []
 
-            # 2. 讀取用戶資料
+            # 2. 讀取用戶資料，並強制更新快取
             try:
-                users_df = get_data("Users")
-                if 'Allowed_Brands' not in users_df.columns:
-                    users_df['Allowed_Brands'] = ""
-                # 強制轉字串
-                users_df['Allowed_Brands'] = users_df['Allowed_Brands'].astype(str).replace('nan', '')
-
-                # 3. 顯示目前列表 (唯讀)
-                st.markdown("##### 目前權限總覽")
-                st.dataframe(
-                    users_df[['Username', 'Dealer_Name', 'Allowed_Brands']], 
-                    use_container_width=True, 
-                    hide_index=True
-                )
+                users_df = get_data("Users", ttl=0) # 強制刷新
                 
-                st.divider()
-                st.markdown("##### ✏️ 修改權限 (自動抓取品牌列表)")
+                # 欄位防呆檢查
+                required_cols = ['Username', 'Dealer_Name']
+                missing_cols = [c for c in required_cols if c not in users_df.columns]
                 
-                c_edit_1, c_edit_2 = st.columns([1, 2])
-                
-                with c_edit_1:
-                    target_user = st.selectbox("選擇要修改的用戶", users_df['Username'].unique())
-                
-                # 抓取該用戶目前的設定
-                current_row = users_df[users_df['Username'] == target_user].iloc[0]
-                current_setting = str(current_row['Allowed_Brands'])
-                
-                # 判斷目前是否為 "All"
-                is_all = (current_setting == "" or "all" in current_setting.lower())
-                
-                # 解析目前已有的品牌 (給 Multiselect 當預設值)
-                default_selected = []
-                if not is_all:
-                    saved_list = [x.strip() for x in current_setting.split(',')]
-                    # 只保留目前仍然存在的品牌
-                    default_selected = [x for x in saved_list if x in all_brands_list]
-
-                with c_edit_2:
-                    allow_all = st.checkbox("✅ 開放所有品牌權限 (All)", value=is_all)
+                if missing_cols:
+                    st.error(f"❌ Google Sheet 資料表缺少欄位: {missing_cols}")
+                    st.write("目前讀取到的欄位:", users_df.columns.tolist())
+                    st.info("請檢查 Google Sheets 'Users' 分頁的第一列標題，必須包含 'Username' 和 'Dealer_Name' (注意大小寫與底線)。")
+                else:
+                    # 確保 Allowed_Brands 欄位存在
+                    if 'Allowed_Brands' not in users_df.columns:
+                        users_df['Allowed_Brands'] = ""
                     
-                    if not allow_all:
-                        selected_brands = st.multiselect(
-                            "請勾選允許的品牌：", 
-                            options=all_brands_list,
-                            default=default_selected
-                        )
-                    else:
-                        st.info("ℹ️ 已選擇開放所有品牌，下方選單無須選擇。")
-                        selected_brands = []
+                    # 強制轉字串，防止數字錯誤
+                    users_df['Allowed_Brands'] = users_df['Allowed_Brands'].astype(str).replace('nan', '')
 
-                if st.button("💾 更新該用戶權限", type="primary"):
-                    try:
-                        if allow_all:
-                            final_str = "All"
+                    # 3. 顯示目前列表 (唯讀)
+                    st.markdown("##### 目前權限總覽")
+                    st.dataframe(
+                        users_df[['Username', 'Dealer_Name', 'Allowed_Brands']], 
+                        use_container_width=True, 
+                        hide_index=True
+                    )
+                    
+                    st.divider()
+                    st.markdown("##### ✏️ 修改權限 (自動抓取品牌列表)")
+                    
+                    c_edit_1, c_edit_2 = st.columns([1, 2])
+                    
+                    with c_edit_1:
+                        target_user = st.selectbox("選擇要修改的用戶", users_df['Username'].unique())
+                    
+                    # 抓取該用戶目前的設定
+                    current_row = users_df[users_df['Username'] == target_user].iloc[0]
+                    current_setting = str(current_row['Allowed_Brands'])
+                    
+                    # 判斷目前是否為 "All"
+                    is_all = (current_setting == "" or "all" in current_setting.lower())
+                    
+                    # 解析目前已有的品牌 (給 Multiselect 當預設值)
+                    default_selected = []
+                    if not is_all:
+                        saved_list = [x.strip() for x in current_setting.split(',')]
+                        # 只保留目前仍然存在的品牌
+                        default_selected = [x for x in saved_list if x in all_brands_list]
+
+                    with c_edit_2:
+                        allow_all = st.checkbox("✅ 開放所有品牌權限 (All)", value=is_all)
+                        
+                        if not allow_all:
+                            selected_brands = st.multiselect(
+                                "請勾選允許的品牌：", 
+                                options=all_brands_list,
+                                default=default_selected
+                            )
                         else:
-                            final_str = ", ".join(selected_brands)
-                        
-                        idx = users_df[users_df['Username'] == target_user].index[0]
-                        users_df.at[idx, 'Allowed_Brands'] = final_str
-                        
-                        update_data("Users", users_df)
-                        st.success(f"✅ 用戶 {target_user} 的權限已更新為: {final_str}")
-                        time.sleep(1)
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"更新失敗: {e}")
+                            st.info("ℹ️ 已選擇開放所有品牌，下方選單無須選擇。")
+                            selected_brands = []
+
+                    if st.button("💾 更新該用戶權限", type="primary"):
+                        try:
+                            if allow_all:
+                                final_str = "All"
+                            else:
+                                final_str = ", ".join(selected_brands)
+                            
+                            idx = users_df[users_df['Username'] == target_user].index[0]
+                            users_df.at[idx, 'Allowed_Brands'] = final_str
+                            
+                            update_data("Users", users_df)
+                            st.success(f"✅ 用戶 {target_user} 的權限已更新為: {final_str}")
+                            time.sleep(1)
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"更新失敗: {e}")
 
             except Exception as e:
                 st.error(f"讀取用戶資料失敗: {e}")
