@@ -187,18 +187,32 @@ st.markdown(
 
 # --- 3. 輔助函數 ---
 
-@st.cache_data(ttl=3600)
+# [修改] 產品資料快取時間延長至 600秒 (10分鐘)，大幅減少 429 錯誤
+@st.cache_data(ttl=600)
 def get_products_data():
-    try:
-        return conn.read(spreadsheet=SHEET_URL, worksheet="Products")
-    except Exception as e:
-        st.error(f"無法讀取產品資料: {e}")
-        return pd.DataFrame()
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            df = conn.read(spreadsheet=SHEET_URL, worksheet="Products")
+            # [新增] 自動清除欄位名稱的空白，防止 'Wholesale_Price ' 這種錯誤
+            df.columns = df.columns.str.strip()
+            return df
+        except Exception as e:
+            if "429" in str(e) or "Quota exceeded" in str(e):
+                if attempt < max_retries - 1:
+                    time.sleep(3 * (attempt + 1)) # 延長等待時間
+                    continue
+            st.error(f"無法讀取產品資料: {e}")
+            return pd.DataFrame() # 回傳空表避免當機
+    return pd.DataFrame()
 
 @st.cache_data(ttl=60)
 def get_brand_rules():
     try:
         df = conn.read(spreadsheet=SHEET_URL, worksheet="BrandRules")
+        # [新增] 清除空白
+        df.columns = df.columns.str.strip()
+        
         rules = {}
         for _, row in df.iterrows():
             rules[row['Brand']] = {
@@ -211,30 +225,28 @@ def get_brand_rules():
         default_df = pd.DataFrame([{"Brand": "default", "Wholesale_Threshold": 10000, "Shipping_Threshold": 10000, "Discount": 0.7}])
         return {"default": {"wholesale_threshold": 10000, "shipping_threshold": 10000, "discount_rate": 0.7}}, default_df
 
-# [修改] 增強版 get_data，加入自動重試機制
+# [修改] 一般資料讀取也加入重試機制
 def get_data(worksheet, ttl=0):
     max_retries = 3
     for attempt in range(max_retries):
         try:
-            return conn.read(spreadsheet=SHEET_URL, worksheet=worksheet, ttl=ttl)
+            df = conn.read(spreadsheet=SHEET_URL, worksheet=worksheet, ttl=ttl)
+            # [新增] 清除空白
+            df.columns = df.columns.str.strip()
+            return df
         except Exception as e:
-            error_str = str(e)
-            # 如果是 429 錯誤 (Quota exceeded)，等待後重試
-            if "429" in error_str or "Quota exceeded" in error_str:
+            if "429" in str(e) or "Quota exceeded" in str(e):
                 if attempt < max_retries - 1:
-                    wait_time = 2 * (attempt + 1) # 2秒, 4秒...
-                    time.sleep(wait_time) 
+                    time.sleep(3 * (attempt + 1))
                     continue
                 else:
-                    st.error("⚠️ 系統忙碌中 (Google API 流量限制)，請稍後再試。")
+                    st.error(f"⚠️ 系統繁忙 (流量限制)，無法讀取 {worksheet}，請稍後再試。")
                     return pd.DataFrame()
             else:
-                # 其他錯誤直接回傳空表
                 return pd.DataFrame()
     return pd.DataFrame()
 
 def update_data(worksheet, df):
-    # 更新時也加入簡單的重試
     try:
         conn.update(spreadsheet=SHEET_URL, worksheet=worksheet, data=df)
         if worksheet == "Products":
@@ -243,9 +255,11 @@ def update_data(worksheet, df):
             get_brand_rules.clear()
     except Exception as e:
         if "429" in str(e):
-            time.sleep(2)
+            st.warning("系統繁忙，正在重試...")
+            time.sleep(3)
             try:
                 conn.update(spreadsheet=SHEET_URL, worksheet=worksheet, data=df)
+                st.success("重試成功！")
             except:
                 st.error("儲存失敗，請稍後再試")
         else:
@@ -395,9 +409,23 @@ def main_app(user):
     if 'editing_customer_info' not in st.session_state: st.session_state.editing_customer_info = None
     
     try:
-        df_products = get_products_data().dropna(how="all")
-        df_products['Wholesale_Price'] = pd.to_numeric(df_products['Wholesale_Price'], errors='coerce').fillna(0)
-        df_products['Retail_Price'] = pd.to_numeric(df_products['Retail_Price'], errors='coerce').fillna(0)
+        df_products = get_products_data()
+        
+        # [防呆檢查] 確認是否有讀到資料
+        if df_products.empty:
+            st.error("無法載入產品資料，請檢查 Google Sheet 連線或稍後再試。")
+            return
+
+        # [修正] 欄位名稱檢查，避免 KeyError
+        if 'Wholesale_Price' in df_products.columns:
+            df_products['Wholesale_Price'] = pd.to_numeric(df_products['Wholesale_Price'], errors='coerce').fillna(0)
+        else:
+            st.error("錯誤：找不到 'Wholesale_Price' 欄位，請檢查 Google Sheet 標題列是否正確。")
+            st.write("目前欄位:", df_products.columns.tolist())
+            return
+
+        if 'Retail_Price' in df_products.columns:
+            df_products['Retail_Price'] = pd.to_numeric(df_products['Retail_Price'], errors='coerce').fillna(0)
         
         # [權限過濾] 
         allowed_brands_str = str(user.get('Allowed_Brands', ''))
@@ -407,7 +435,7 @@ def main_app(user):
                 df_products = df_products[df_products['Brand'].isin(allowed_list)]
                 
     except Exception as e:
-        st.error(f"無法讀取產品資料: {e}")
+        st.error(f"處理產品資料時發生錯誤: {e}")
         return
 
     # [防呆] 如果過濾後沒有產品
@@ -701,37 +729,31 @@ def main_app(user):
                     st.rerun()
                 except Exception as e: st.error(f"儲存失敗: {e}")
         
-        # [Tab 3 改寫] 新版：使用多選選單介面，並防呆處理
         with tab3:
             st.subheader("👥 用戶權限管理")
             
-            # 1. 取得所有品牌 (從產品表自動抓取)
             try:
                 all_brands_list = sorted(get_products_data()['Brand'].dropna().unique().tolist())
             except:
                 all_brands_list = []
 
-            # 2. 讀取用戶資料，並強制更新快取 [修改：ttl=5，防止429]
             try:
+                # [修改] 快取時間延長至 5 秒
                 users_df = get_data("Users", ttl=5) 
                 
-                # 欄位防呆檢查
                 required_cols = ['Username', 'Dealer_Name']
                 missing_cols = [c for c in required_cols if c not in users_df.columns]
                 
                 if missing_cols:
                     st.error(f"❌ Google Sheet 資料表缺少欄位: {missing_cols}")
                     st.write("目前讀取到的欄位:", users_df.columns.tolist())
-                    st.info("請檢查 Google Sheets 'Users' 分頁的第一列標題，必須包含 'Username' 和 'Dealer_Name' (注意大小寫與底線)。")
+                    st.info("請檢查 Google Sheets 'Users' 分頁的第一列標題。")
                 else:
-                    # 確保 Allowed_Brands 欄位存在
                     if 'Allowed_Brands' not in users_df.columns:
                         users_df['Allowed_Brands'] = ""
                     
-                    # 強制轉字串，防止數字錯誤
                     users_df['Allowed_Brands'] = users_df['Allowed_Brands'].astype(str).replace('nan', '')
 
-                    # 3. 顯示目前列表 (唯讀)
                     st.markdown("##### 目前權限總覽")
                     st.dataframe(
                         users_df[['Username', 'Dealer_Name', 'Allowed_Brands']], 
@@ -747,18 +769,14 @@ def main_app(user):
                     with c_edit_1:
                         target_user = st.selectbox("選擇要修改的用戶", users_df['Username'].unique())
                     
-                    # 抓取該用戶目前的設定
                     current_row = users_df[users_df['Username'] == target_user].iloc[0]
                     current_setting = str(current_row['Allowed_Brands'])
                     
-                    # 判斷目前是否為 "All"
                     is_all = (current_setting == "" or "all" in current_setting.lower())
                     
-                    # 解析目前已有的品牌 (給 Multiselect 當預設值)
                     default_selected = []
                     if not is_all:
                         saved_list = [x.strip() for x in current_setting.split(',')]
-                        # 只保留目前仍然存在的品牌
                         default_selected = [x for x in saved_list if x in all_brands_list]
 
                     with c_edit_2:
