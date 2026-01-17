@@ -211,18 +211,45 @@ def get_brand_rules():
         default_df = pd.DataFrame([{"Brand": "default", "Wholesale_Threshold": 10000, "Shipping_Threshold": 10000, "Discount": 0.7}])
         return {"default": {"wholesale_threshold": 10000, "shipping_threshold": 10000, "discount_rate": 0.7}}, default_df
 
-def get_data(worksheet, ttl=0): # 預設不快取，確保最新
-    try:
-        return conn.read(spreadsheet=SHEET_URL, worksheet=worksheet, ttl=ttl)
-    except:
-        return pd.DataFrame()
+# [修改] 增強版 get_data，加入自動重試機制
+def get_data(worksheet, ttl=0):
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            return conn.read(spreadsheet=SHEET_URL, worksheet=worksheet, ttl=ttl)
+        except Exception as e:
+            error_str = str(e)
+            # 如果是 429 錯誤 (Quota exceeded)，等待後重試
+            if "429" in error_str or "Quota exceeded" in error_str:
+                if attempt < max_retries - 1:
+                    wait_time = 2 * (attempt + 1) # 2秒, 4秒...
+                    time.sleep(wait_time) 
+                    continue
+                else:
+                    st.error("⚠️ 系統忙碌中 (Google API 流量限制)，請稍後再試。")
+                    return pd.DataFrame()
+            else:
+                # 其他錯誤直接回傳空表
+                return pd.DataFrame()
+    return pd.DataFrame()
 
 def update_data(worksheet, df):
-    conn.update(spreadsheet=SHEET_URL, worksheet=worksheet, data=df)
-    if worksheet == "Products":
-        get_products_data.clear()
-    if worksheet == "BrandRules":
-        get_brand_rules.clear()
+    # 更新時也加入簡單的重試
+    try:
+        conn.update(spreadsheet=SHEET_URL, worksheet=worksheet, data=df)
+        if worksheet == "Products":
+            get_products_data.clear()
+        if worksheet == "BrandRules":
+            get_brand_rules.clear()
+    except Exception as e:
+        if "429" in str(e):
+            time.sleep(2)
+            try:
+                conn.update(spreadsheet=SHEET_URL, worksheet=worksheet, data=df)
+            except:
+                st.error("儲存失敗，請稍後再試")
+        else:
+            st.error(f"儲存失敗: {e}")
 
 def convert_drive_url(url):
     if pd.isna(url) or not isinstance(url, str): 
@@ -684,9 +711,9 @@ def main_app(user):
             except:
                 all_brands_list = []
 
-            # 2. 讀取用戶資料，並強制更新快取
+            # 2. 讀取用戶資料，並強制更新快取 [修改：ttl=5，防止429]
             try:
-                users_df = get_data("Users", ttl=0) # 強制刷新
+                users_df = get_data("Users", ttl=5) 
                 
                 # 欄位防呆檢查
                 required_cols = ['Username', 'Dealer_Name']
