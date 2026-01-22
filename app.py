@@ -942,21 +942,18 @@ def main_app(user):
                 for b_name, data in brand_groups.items():
                     safe_default = {"wholesale_threshold": 10000, "shipping_threshold": 10000, "discount_rate": 0.7}
                     rule = BRAND_RULES.get(b_name, BRAND_RULES.get("default", safe_default))
-                    d_rate = rule.get('discount_rate', 0.7)
                     w_threshold = rule.get('wholesale_threshold', 10000)
+                    s_threshold = rule.get('shipping_threshold', 10000)
+                    discount = rule.get('discount_rate', 0.7)
                     
-                    # [修改] 改用有色底塊顯示狀態
-                    if data['is_wholesale_qualified']:
-                        # 達到門檻：綠色底 (Success)
-                        msg = f"**{b_name}** | 小計 ${data['raw_wholesale_total']} (已達門檻 ${w_threshold}) ➝ **批發價**"
-                        if data['is_shipping_qualified']: msg += " | 🚚 免運"
-                        st.success(msg, icon="✅")
+                    if data['raw_wholesale_total'] >= w_threshold:
+                        data['is_wholesale_qualified'] = True
+                        brand_subtotal = data['raw_wholesale_total']
+                        brand_tax = int(round(brand_subtotal * TAX_RATE)) # 修正稅金計算
                     else:
-                        # 未達門檻：黃色底 (Warning) - 這就是您要的效果
-                        msg = f"**{b_name}** | 小計 ${data['raw_wholesale_total']} (未達門檻 ${w_threshold}) ➝ **零售{int(d_rate*10)}折**"
-                        if data['is_shipping_qualified']: msg += " | 🚚 免運"
-                        st.warning(msg, icon="⚠️")
-
+                        data['is_wholesale_qualified'] = False
+                        brand_subtotal = 0
+                        brand_tax = 0
                         for item in data['items']:
                             # [修改] 金額計算修正，使用 round
                             brand_subtotal += int(round(item['retail_price'] * discount)) * item['qty']
