@@ -98,33 +98,27 @@ st.markdown(
         border: none !important;            
         background-color: transparent !important; 
         box-shadow: none !important;        
-        padding: 2px 5px !important;        
+        padding: 0px !important; /* 修正：移除內距讓符號置中 */
+        min-height: 0px !important;
+        height: auto !important;
     }
 
     div[data-testid="stVerticalBlockBorderWrapper"] button[kind="secondary"] p {
         color: #000000 !important;          
         font-weight: bold !important;
-        font-size: 10px !important;         
+        font-size: 16px !important;         
+        margin: 0px !important;
+        padding: 0px !important;
+        line-height: 1.2 !important;
     }
 
     div[data-testid="stVerticalBlockBorderWrapper"] button[kind="secondary"]:hover {
         color: #ff5000 !important;          
-        background-color: transparent !important; 
+        background-color: #f0f0f0 !important; /* 增加一點底色互動 */
         border: none !important;
     }
     div[data-testid="stVerticalBlockBorderWrapper"] button[kind="secondary"]:hover p {
         color: #ff5000 !important;
-    }
-
-    /* 購物車小按鈕微調 */
-    div[data-testid="stVerticalBlockBorderWrapper"] button[kind="secondary"] p:contains("▬▬"),
-    div[data-testid="stVerticalBlockBorderWrapper"] button[kind="secondary"] p:contains("╋"),
-    div[data-testid="stVerticalBlockBorderWrapper"] button[kind="secondary"] p:contains("✖") {
-         font-size: 20px !important;
-    }
-    
-    div[data-testid="stVerticalBlockBorderWrapper"] button[kind="secondary"]:not(:has(p:contains("Non-stop"))):not(:has(p:contains("Vegdog"))) {
-        min-width: 30px !important;        
     }
 
     /* 主要按鈕 (ADD / CHECKOUT) */
@@ -346,10 +340,8 @@ def send_order_email(order_data, cart_items, is_update=False):
         extra_info += f"<p style='margin: 5px 0;'><strong>📦 物流單號:</strong> {order_data['Tracking_Number']}</p>"
     if order_data.get('Admin_Note'):
         extra_info += f"<p style='margin: 5px 0; color: #ff5500;'><strong>📝 賣家備註:</strong> {order_data['Admin_Note']}</p>"
-    
-    # [修改] 顯示加減價資訊 (正數折扣, 負數加價)
-    extra_val = int(order_data.get('Extra_Discount', 0))
-    if extra_val != 0:
+    if order_data.get('Extra_Discount') and int(order_data['Extra_Discount']) != 0:
+        extra_val = int(order_data['Extra_Discount'])
         sign = "-" if extra_val > 0 else "+"
         color = "green" if extra_val > 0 else "red"
         extra_info += f"<p style='margin: 5px 0; color: {color};'><strong>🎁 額外調整:</strong> {sign}${abs(extra_val)}</p>"
@@ -419,12 +411,12 @@ def main_app(user):
             df_products['Wholesale_Price'] = pd.to_numeric(df_products['Wholesale_Price'], errors='coerce').fillna(0)
         else:
             st.error("錯誤：找不到 'Wholesale_Price' 欄位，請檢查 Google Sheet 標題列是否正確。")
+            st.write("目前欄位:", df_products.columns.tolist())
             return
 
         if 'Retail_Price' in df_products.columns:
             df_products['Retail_Price'] = pd.to_numeric(df_products['Retail_Price'], errors='coerce').fillna(0)
         
-        # 權限過濾
         allowed_brands_str = str(user.get('Allowed_Brands', ''))
         if pd.notna(allowed_brands_str) and allowed_brands_str.strip() != "" and allowed_brands_str.lower() != "nan":
             allowed_list = [b.strip() for b in allowed_brands_str.split(',') if b.strip()]
@@ -518,7 +510,6 @@ def main_app(user):
                 
                 if not my_orders.empty:
                     for index, row in my_orders.iterrows():
-                        # [修改] 歷史訂單也加上狀態圖示
                         status_str = str(row['Status'])
                         status_icon = ""
                         if "已完成" in status_str: status_icon = "✅"
@@ -583,19 +574,15 @@ def main_app(user):
                         st.markdown(f"共 {len(all_orders)} 筆訂單")
                         
                         for index, row in all_orders.iterrows():
-                            # [修改] 訂單狀態 Emoji 顯示
                             status_str = str(row['Status'])
                             status_icon = ""
                             if "已完成" in status_str: status_icon += "✅"
                             elif "已出貨" in status_str: status_icon += "🚚"
                             elif "處理中" in status_str: status_icon += "⏳"
-                            
                             if "未付款" in status_str: status_icon += "🔴"
                             elif "已付款" in status_str: status_icon += "💰"
 
                             status_badges = display_status_badges(row['Status'])
-                            
-                            # [修改] 標題加入狀態文字
                             expander_title = f"{status_icon} 【{status_str}】 {row['Order_Time']} - {row['Customer_Name']} (${row['Total']})"
                             
                             with st.expander(expander_title):
@@ -619,7 +606,6 @@ def main_app(user):
                                     st.markdown(f"**運費:** ${row['Shipping']}")
                                     extra_disc_show = int(row.get('Extra_Discount', 0))
                                     if extra_disc_show != 0:
-                                        # [修改] 正數折扣，負數加價顯示
                                         sign = "-" if extra_disc_show > 0 else "+"
                                         color = "green" if extra_disc_show > 0 else "red"
                                         st.markdown(f"<span style='color:{color}'>**調整:** {sign}${abs(extra_disc_show)}</span>", unsafe_allow_html=True)
@@ -643,7 +629,6 @@ def main_app(user):
                                 ic1, ic2, ic3, ic4 = st.columns([2, 3, 1.5, 1], vertical_alignment="bottom")
                                 new_track = ic1.text_input("物流單號", value=str(row['Tracking_Number']) if pd.notna(row['Tracking_Number']) else "", key=track_key)
                                 new_note = ic2.text_area("備註 (買家可見)", value=str(row['Admin_Note']) if pd.notna(row['Admin_Note']) else "", key=note_key, height=100)
-                                # [修改] 允許輸入負數
                                 new_discount = ic3.number_input("額外折扣/調整 (正數=扣款, 負數=加價)", value=int(row.get('Extra_Discount', 0)), key=disc_key)
                                 
                                 if ic4.button("💾 儲存資訊", key=f"save_info_{row['Order_ID']}"):
@@ -932,7 +917,6 @@ def main_app(user):
                     if b_name not in brand_groups:
                         brand_groups[b_name] = {'items': [], 'raw_wholesale_total': 0, 'is_wholesale_qualified': False, 'is_shipping_qualified': False}
                     brand_groups[b_name]['items'].append(item)
-                    # [修改] 金額計算修正，使用 round 處理浮點數
                     brand_groups[b_name]['raw_wholesale_total'] += int(round(item['wholesale_price'] * item['qty']))
 
                 is_order_free_shipping = False 
@@ -942,21 +926,20 @@ def main_app(user):
                 for b_name, data in brand_groups.items():
                     safe_default = {"wholesale_threshold": 10000, "shipping_threshold": 10000, "discount_rate": 0.7}
                     rule = BRAND_RULES.get(b_name, BRAND_RULES.get("default", safe_default))
+                    d_rate = rule.get('discount_rate', 0.7)
                     w_threshold = rule.get('wholesale_threshold', 10000)
                     s_threshold = rule.get('shipping_threshold', 10000)
-                    discount = rule.get('discount_rate', 0.7)
                     
                     if data['raw_wholesale_total'] >= w_threshold:
                         data['is_wholesale_qualified'] = True
                         brand_subtotal = data['raw_wholesale_total']
-                        brand_tax = int(round(brand_subtotal * TAX_RATE)) # 修正稅金計算
+                        brand_tax = int(round(brand_subtotal * TAX_RATE))
                     else:
                         data['is_wholesale_qualified'] = False
                         brand_subtotal = 0
                         brand_tax = 0
                         for item in data['items']:
-                            # [修改] 金額計算修正，使用 round
-                            brand_subtotal += int(round(item['retail_price'] * discount)) * item['qty']
+                            brand_subtotal += int(round(item['retail_price'] * d_rate)) * item['qty']
 
                     if data['raw_wholesale_total'] >= s_threshold:
                         data['is_shipping_qualified'] = True
@@ -966,8 +949,48 @@ def main_app(user):
                     grand_total_tax += brand_tax
                     for item in data['items']:
                         if data['is_wholesale_qualified']: item['final_unit_price'] = item['wholesale_price']
-                        else: item['final_unit_price'] = int(round(item['retail_price'] * discount))
+                        else: item['final_unit_price'] = int(round(item['retail_price'] * d_rate))
                         item['final_subtotal'] = item['final_unit_price'] * item['qty']
+
+                for b_name, data in brand_groups.items():
+                    safe_default = {"wholesale_threshold": 10000, "shipping_threshold": 10000, "discount_rate": 0.7}
+                    rule = BRAND_RULES.get(b_name, BRAND_RULES.get("default", safe_default))
+                    d_rate = rule.get('discount_rate', 0.7)
+                    w_threshold = rule.get('wholesale_threshold', 10000)
+                    
+                    if data['is_wholesale_qualified']:
+                        msg = f"**{b_name}** | 小計 ${data['raw_wholesale_total']} (已達門檻 ${w_threshold}) ➝ **批發價**"
+                        if data['is_shipping_qualified']: msg += " | 🚚 免運"
+                        st.success(msg, icon="✅")
+                    else:
+                        msg = f"**{b_name}** | 小計 ${data['raw_wholesale_total']} (未達門檻 ${w_threshold}) ➝ **零售{int(d_rate*10)}折**"
+                        if data['is_shipping_qualified']: msg += " | 🚚 免運"
+                        st.warning(msg, icon="⚠️")
+
+                    for item in data['items']:
+                        # [修改] 扁平化購物車排版，移除多層 columns
+                        c_name, c_min, c_qty, c_plus, c_del, c_price = st.columns([3, 0.6, 0.6, 0.6, 0.6, 1.5], vertical_alignment="center")
+                        
+                        with c_name:
+                            st.markdown(f"{item['name']} <span style='color:#888; font-size:12px;'>({item['spec']})</span>", unsafe_allow_html=True)
+                        with c_min:
+                            if st.button("▬▬", key=f"cart_min_{item['id']}", type="secondary"):
+                                item['qty'] -= 1
+                                if item['qty'] <= 0: del st.session_state.cart[item['id']]
+                                st.rerun()
+                        with c_qty:
+                            st.markdown(f"<div style='text-align:center; font-size:14px; font-weight:bold;'>{item['qty']}</div>", unsafe_allow_html=True)
+                        with c_plus:
+                            if st.button("╋", key=f"cart_plus_{item['id']}", type="secondary"):
+                                item['qty'] += 1
+                                st.rerun()
+                        with c_del:
+                            if st.button("✖", key=f"cart_del_{item['id']}", type="secondary", help="移除此商品"):
+                                del st.session_state.cart[item['id']]
+                                st.rerun()
+                        with c_price:
+                            st.markdown(f"<div style='text-align:right; font-weight:bold;'>${item['final_subtotal']}</div>", unsafe_allow_html=True)
+                    st.divider()
 
                 if is_order_free_shipping:
                     shipping = 0
@@ -977,34 +1000,6 @@ def main_app(user):
                     shipping_msg = f"運費 ${SHIPPING_FEE}"
 
                 grand_total = grand_total_subtotal + grand_total_tax + shipping
-
-                for b_name, data in brand_groups.items():
-                    safe_default = {"wholesale_threshold": 10000, "shipping_threshold": 10000, "discount_rate": 0.7}
-                    rule = BRAND_RULES.get(b_name, BRAND_RULES.get("default", safe_default))
-                    w_icon = "🟢" if data['is_wholesale_qualified'] else "🟠"
-                    s_icon = "🚚" if data['is_shipping_qualified'] else ""
-                    d_rate = rule.get('discount_rate', 0.7)
-                    price_text = "批發價" if data['is_wholesale_qualified'] else f"零售{int(d_rate*10)}折"
-                    caption_text = f"{w_icon} **{b_name}** | ${data['raw_wholesale_total']} (門檻:${rule.get('wholesale_threshold', 10000)}) -> {price_text} {s_icon}"
-                    st.caption(caption_text)
-                    for item in data['items']:
-                        c_ctrl, c_sub = st.columns([2, 1], vertical_alignment="center")
-                        with c_ctrl:
-                            st.markdown(f"{item['name']} <span style='color:#888; font-size:12px;'>({item['spec']})</span>", unsafe_allow_html=True)
-                            bc1, bc2, bc3, bc4 = st.columns([0.8, 0.8, 0.8, 0.8], gap="small", vertical_alignment="center")
-                            if bc1.button("▬▬", key=f"cart_min_{item['id']}", type="secondary"):
-                                item['qty'] -= 1
-                                if item['qty'] <= 0: del st.session_state.cart[item['id']]
-                                st.rerun()
-                            bc2.markdown(f"<div style='text-align:center; font-size:14px;'>{item['qty']}</div>", unsafe_allow_html=True)
-                            if bc3.button("╋", key=f"cart_plus_{item['id']}", type="secondary"):
-                                item['qty'] += 1
-                                st.rerun()
-                            if bc4.button("✖", key=f"cart_del_{item['id']}", type="secondary", help="移除此商品"):
-                                del st.session_state.cart[item['id']]
-                                st.rerun()
-                        with c_sub: st.markdown(f"<div style='text-align:right; font-weight:bold;'>${item['final_subtotal']}</div>", unsafe_allow_html=True)
-                    st.divider()
                 
                 r1, r2 = st.columns(2)
                 r1.text("小計 (Subtotal)")
