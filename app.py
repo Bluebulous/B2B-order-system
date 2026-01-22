@@ -104,7 +104,7 @@ st.markdown(
     div[data-testid="stVerticalBlockBorderWrapper"] button[kind="secondary"] p {
         color: #000000 !important;          
         font-weight: bold !important;
-        font-size: 16px !important;         
+        font-size: 10px !important;         
     }
 
     div[data-testid="stVerticalBlockBorderWrapper"] button[kind="secondary"]:hover {
@@ -187,30 +187,27 @@ st.markdown(
 
 # --- 3. 輔助函數 ---
 
-# [修改] 產品資料快取時間延長至 600秒 (10分鐘)，大幅減少 429 錯誤
 @st.cache_data(ttl=600)
 def get_products_data():
     max_retries = 3
     for attempt in range(max_retries):
         try:
             df = conn.read(spreadsheet=SHEET_URL, worksheet="Products")
-            # [新增] 自動清除欄位名稱的空白，防止 'Wholesale_Price ' 這種錯誤
             df.columns = df.columns.str.strip()
             return df
         except Exception as e:
             if "429" in str(e) or "Quota exceeded" in str(e):
                 if attempt < max_retries - 1:
-                    time.sleep(3 * (attempt + 1)) # 延長等待時間
+                    time.sleep(3 * (attempt + 1)) 
                     continue
             st.error(f"無法讀取產品資料: {e}")
-            return pd.DataFrame() # 回傳空表避免當機
+            return pd.DataFrame()
     return pd.DataFrame()
 
 @st.cache_data(ttl=60)
 def get_brand_rules():
     try:
         df = conn.read(spreadsheet=SHEET_URL, worksheet="BrandRules")
-        # [新增] 清除空白
         df.columns = df.columns.str.strip()
         
         rules = {}
@@ -225,13 +222,11 @@ def get_brand_rules():
         default_df = pd.DataFrame([{"Brand": "default", "Wholesale_Threshold": 10000, "Shipping_Threshold": 10000, "Discount": 0.7}])
         return {"default": {"wholesale_threshold": 10000, "shipping_threshold": 10000, "discount_rate": 0.7}}, default_df
 
-# [修改] 一般資料讀取也加入重試機制
 def get_data(worksheet, ttl=0):
     max_retries = 3
     for attempt in range(max_retries):
         try:
             df = conn.read(spreadsheet=SHEET_URL, worksheet=worksheet, ttl=ttl)
-            # [新增] 清除空白
             df.columns = df.columns.str.strip()
             return df
         except Exception as e:
@@ -351,8 +346,13 @@ def send_order_email(order_data, cart_items, is_update=False):
         extra_info += f"<p style='margin: 5px 0;'><strong>📦 物流單號:</strong> {order_data['Tracking_Number']}</p>"
     if order_data.get('Admin_Note'):
         extra_info += f"<p style='margin: 5px 0; color: #ff5500;'><strong>📝 賣家備註:</strong> {order_data['Admin_Note']}</p>"
-    if order_data.get('Extra_Discount') and int(order_data['Extra_Discount']) > 0:
-        extra_info += f"<p style='margin: 5px 0; color: green;'><strong>🎁 額外折扣:</strong> -${int(order_data['Extra_Discount'])}</p>"
+    
+    # [修改] 顯示加減價資訊 (正數折扣, 負數加價)
+    extra_val = int(order_data.get('Extra_Discount', 0))
+    if extra_val != 0:
+        sign = "-" if extra_val > 0 else "+"
+        color = "green" if extra_val > 0 else "red"
+        extra_info += f"<p style='margin: 5px 0; color: {color};'><strong>🎁 額外調整:</strong> {sign}${abs(extra_val)}</p>"
 
     html_content = f"""
     <html>
@@ -411,23 +411,20 @@ def main_app(user):
     try:
         df_products = get_products_data()
         
-        # [防呆檢查] 確認是否有讀到資料
         if df_products.empty:
             st.error("無法載入產品資料，請檢查 Google Sheet 連線或稍後再試。")
             return
 
-        # [修正] 欄位名稱檢查，避免 KeyError
         if 'Wholesale_Price' in df_products.columns:
             df_products['Wholesale_Price'] = pd.to_numeric(df_products['Wholesale_Price'], errors='coerce').fillna(0)
         else:
             st.error("錯誤：找不到 'Wholesale_Price' 欄位，請檢查 Google Sheet 標題列是否正確。")
-            st.write("目前欄位:", df_products.columns.tolist())
             return
 
         if 'Retail_Price' in df_products.columns:
             df_products['Retail_Price'] = pd.to_numeric(df_products['Retail_Price'], errors='coerce').fillna(0)
         
-        # [權限過濾] 
+        # 權限過濾
         allowed_brands_str = str(user.get('Allowed_Brands', ''))
         if pd.notna(allowed_brands_str) and allowed_brands_str.strip() != "" and allowed_brands_str.lower() != "nan":
             allowed_list = [b.strip() for b in allowed_brands_str.split(',') if b.strip()]
@@ -438,7 +435,6 @@ def main_app(user):
         st.error(f"處理產品資料時發生錯誤: {e}")
         return
 
-    # [防呆] 如果過濾後沒有產品
     if df_products.empty:
         st.warning("⚠️ 目前沒有您有權限查看的產品，請聯繫管理員。")
         with st.sidebar:
@@ -522,7 +518,16 @@ def main_app(user):
                 
                 if not my_orders.empty:
                     for index, row in my_orders.iterrows():
-                        expander_title = f"{row['Order_Time']} | ${row['Total']}"
+                        # [修改] 歷史訂單也加上狀態圖示
+                        status_str = str(row['Status'])
+                        status_icon = ""
+                        if "已完成" in status_str: status_icon = "✅"
+                        elif "已出貨" in status_str: status_icon = "🚚"
+                        elif "處理中" in status_str: status_icon = "⏳"
+                        if "未付款" in status_str: status_icon += "🔴"
+                        elif "已付款" in status_str: status_icon += "💰"
+
+                        expander_title = f"{status_icon} [{status_str}] {row['Order_Time']} | ${row['Total']}"
                         with st.expander(expander_title):
                             st.markdown(f"### 狀態: {display_status_badges(row['Status'])}", unsafe_allow_html=True)
                             st.divider()
@@ -531,8 +536,10 @@ def main_app(user):
                                 st.markdown(f"**訂單編號:** {row['Order_ID']}")
                                 st.markdown(f"**總金額:** ${row['Total']}")
                                 extra_disc = int(row.get('Extra_Discount', 0))
-                                if extra_disc > 0:
-                                    st.markdown(f"<span style='color:green;'>**🎁 額外折扣:** -${extra_disc}</span>", unsafe_allow_html=True)
+                                if extra_disc != 0:
+                                    sign = "-" if extra_disc > 0 else "+"
+                                    color = "green" if extra_disc > 0 else "red"
+                                    st.markdown(f"<span style='color:{color};'>**🎁 額外調整:** {sign}${abs(extra_disc)}</span>", unsafe_allow_html=True)
                                 if pd.notna(row['Tracking_Number']) and str(row['Tracking_Number']).strip() != "":
                                     st.info(f"📦 **物流單號:** {row['Tracking_Number']}")
                                 if pd.notna(row['Admin_Note']) and str(row['Admin_Note']).strip() != "":
@@ -576,8 +583,20 @@ def main_app(user):
                         st.markdown(f"共 {len(all_orders)} 筆訂單")
                         
                         for index, row in all_orders.iterrows():
+                            # [修改] 訂單狀態 Emoji 顯示
+                            status_str = str(row['Status'])
+                            status_icon = ""
+                            if "已完成" in status_str: status_icon += "✅"
+                            elif "已出貨" in status_str: status_icon += "🚚"
+                            elif "處理中" in status_str: status_icon += "⏳"
+                            
+                            if "未付款" in status_str: status_icon += "🔴"
+                            elif "已付款" in status_str: status_icon += "💰"
+
                             status_badges = display_status_badges(row['Status'])
-                            expander_title = f"{row['Order_Time']} - {row['Customer_Name']} (${row['Total']})"
+                            
+                            # [修改] 標題加入狀態文字
+                            expander_title = f"{status_icon} 【{status_str}】 {row['Order_Time']} - {row['Customer_Name']} (${row['Total']})"
                             
                             with st.expander(expander_title):
                                 st.markdown(f"### 目前狀態: {status_badges}", unsafe_allow_html=True)
@@ -599,8 +618,11 @@ def main_app(user):
                                     st.markdown(f"**稅金:** ${row['Tax']}")
                                     st.markdown(f"**運費:** ${row['Shipping']}")
                                     extra_disc_show = int(row.get('Extra_Discount', 0))
-                                    if extra_disc_show > 0:
-                                        st.markdown(f"<span style='color:green'>**折扣:** -${extra_disc_show}</span>", unsafe_allow_html=True)
+                                    if extra_disc_show != 0:
+                                        # [修改] 正數折扣，負數加價顯示
+                                        sign = "-" if extra_disc_show > 0 else "+"
+                                        color = "green" if extra_disc_show > 0 else "red"
+                                        st.markdown(f"<span style='color:{color}'>**調整:** {sign}${abs(extra_disc_show)}</span>", unsafe_allow_html=True)
                                     st.markdown(f"### Total: ${row['Total']}")
                                     
                                     if st.button("✏️ 修改內容 (進入購物車)", key=f"admin_edit_{row['Order_ID']}", type="primary"):
@@ -621,7 +643,8 @@ def main_app(user):
                                 ic1, ic2, ic3, ic4 = st.columns([2, 3, 1.5, 1], vertical_alignment="bottom")
                                 new_track = ic1.text_input("物流單號", value=str(row['Tracking_Number']) if pd.notna(row['Tracking_Number']) else "", key=track_key)
                                 new_note = ic2.text_area("備註 (買家可見)", value=str(row['Admin_Note']) if pd.notna(row['Admin_Note']) else "", key=note_key, height=100)
-                                new_discount = ic3.number_input("額外折扣 (扣減金額)", min_value=0, value=int(row.get('Extra_Discount', 0)), key=disc_key)
+                                # [修改] 允許輸入負數
+                                new_discount = ic3.number_input("額外折扣/調整 (正數=扣款, 負數=加價)", value=int(row.get('Extra_Discount', 0)), key=disc_key)
                                 
                                 if ic4.button("💾 儲存資訊", key=f"save_info_{row['Order_ID']}"):
                                     try:
@@ -738,7 +761,6 @@ def main_app(user):
                 all_brands_list = []
 
             try:
-                # [修改] 快取時間延長至 5 秒
                 users_df = get_data("Users", ttl=5) 
                 
                 required_cols = ['Username', 'Dealer_Name']
@@ -910,7 +932,8 @@ def main_app(user):
                     if b_name not in brand_groups:
                         brand_groups[b_name] = {'items': [], 'raw_wholesale_total': 0, 'is_wholesale_qualified': False, 'is_shipping_qualified': False}
                     brand_groups[b_name]['items'].append(item)
-                    brand_groups[b_name]['raw_wholesale_total'] += item['wholesale_price'] * item['qty']
+                    # [修改] 金額計算修正，使用 round 處理浮點數
+                    brand_groups[b_name]['raw_wholesale_total'] += int(round(item['wholesale_price'] * item['qty']))
 
                 is_order_free_shipping = False 
                 grand_total_subtotal = 0
@@ -926,13 +949,14 @@ def main_app(user):
                     if data['raw_wholesale_total'] >= w_threshold:
                         data['is_wholesale_qualified'] = True
                         brand_subtotal = data['raw_wholesale_total']
-                        brand_tax = int(brand_subtotal * TAX_RATE)
+                        brand_tax = int(round(brand_subtotal * TAX_RATE)) # 修正稅金計算
                     else:
                         data['is_wholesale_qualified'] = False
                         brand_subtotal = 0
                         brand_tax = 0
                         for item in data['items']:
-                            brand_subtotal += int(item['retail_price'] * discount) * item['qty']
+                            # [修改] 金額計算修正，使用 round
+                            brand_subtotal += int(round(item['retail_price'] * discount)) * item['qty']
 
                     if data['raw_wholesale_total'] >= s_threshold:
                         data['is_shipping_qualified'] = True
@@ -942,7 +966,7 @@ def main_app(user):
                     grand_total_tax += brand_tax
                     for item in data['items']:
                         if data['is_wholesale_qualified']: item['final_unit_price'] = item['wholesale_price']
-                        else: item['final_unit_price'] = int(item['retail_price'] * discount)
+                        else: item['final_unit_price'] = int(round(item['retail_price'] * discount))
                         item['final_subtotal'] = item['final_unit_price'] * item['qty']
 
                 if is_order_free_shipping:
