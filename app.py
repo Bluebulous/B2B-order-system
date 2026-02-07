@@ -320,8 +320,8 @@ def calculate_new_status(current_status, new_action_group, new_action_value):
 def send_order_email(order_data, cart_items, is_update=False):
     SMTP_SERVER = "smtp.gmail.com"
     SMTP_PORT = 587
-    SENDER_EMAIL = "bluebulous.offcial@gmail.com"
-    SENDER_PASSWORD = "vusc ncoh mlma dhcx"
+    SENDER_EMAIL = "bluebulous.official@gmail.com"
+    SENDER_PASSWORD = "mjzm yfwj nbxz nefj"
 
     msg = MIMEMultipart()
     msg['From'] = SENDER_EMAIL
