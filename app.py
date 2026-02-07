@@ -4,6 +4,7 @@ from streamlit_gsheets import GSheetsConnection
 from datetime import datetime
 import json
 import time
+import random  # [新增] 用於隨機等待時間
 
 # Email 相關模組
 import smtplib
@@ -181,28 +182,34 @@ st.markdown(
 
 # --- 3. 輔助函數 ---
 
-@st.cache_data(ttl=600)
+# [修正 429] 延長快取至 3600 秒，並使用指數退避重試
+@st.cache_data(ttl=3600)
 def get_products_data():
-    max_retries = 3
+    max_retries = 5 # 增加重試次數
     for attempt in range(max_retries):
         try:
             df = conn.read(spreadsheet=SHEET_URL, worksheet="Products")
             df.columns = df.columns.str.strip()
+            # 清除所有文字欄位的前後空白 (Fix: Freemotion size issue)
+            df = df.apply(lambda x: x.str.strip() if x.dtype == "object" else x)
             return df
         except Exception as e:
             if "429" in str(e) or "Quota exceeded" in str(e):
+                # 指數退避: 2s -> 4s -> 8s -> 16s... + 隨機緩衝
+                wait_time = (2 ** attempt) + random.random()
                 if attempt < max_retries - 1:
-                    time.sleep(3 * (attempt + 1)) 
+                    time.sleep(wait_time) 
                     continue
-            st.error(f"無法讀取產品資料: {e}")
+            st.error(f"無法讀取產品資料 (請稍後再試): {e}")
             return pd.DataFrame()
     return pd.DataFrame()
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=3600)
 def get_brand_rules():
     try:
         df = conn.read(spreadsheet=SHEET_URL, worksheet="BrandRules")
         df.columns = df.columns.str.strip()
+        df = df.apply(lambda x: x.str.strip() if x.dtype == "object" else x)
         
         rules = {}
         for _, row in df.iterrows():
@@ -216,43 +223,47 @@ def get_brand_rules():
         default_df = pd.DataFrame([{"Brand": "default", "Wholesale_Threshold": 10000, "Shipping_Threshold": 10000, "Discount": 0.7}])
         return {"default": {"wholesale_threshold": 10000, "shipping_threshold": 10000, "discount_rate": 0.7}}, default_df
 
+# [修正 429] 一般讀取也加入強效重試
 def get_data(worksheet, ttl=0):
-    max_retries = 3
+    max_retries = 5
     for attempt in range(max_retries):
         try:
             df = conn.read(spreadsheet=SHEET_URL, worksheet=worksheet, ttl=ttl)
             df.columns = df.columns.str.strip()
+            df = df.apply(lambda x: x.str.strip() if x.dtype == "object" else x)
             return df
         except Exception as e:
             if "429" in str(e) or "Quota exceeded" in str(e):
+                wait_time = (2 ** attempt) + random.random()
                 if attempt < max_retries - 1:
-                    time.sleep(3 * (attempt + 1))
+                    time.sleep(wait_time)
                     continue
                 else:
-                    st.error(f"⚠️ 系統繁忙 (流量限制)，無法讀取 {worksheet}，請稍後再試。")
+                    st.error(f"⚠️ 系統繁忙 (Google API 流量限制)，請稍後再試。")
                     return pd.DataFrame()
             else:
                 return pd.DataFrame()
     return pd.DataFrame()
 
 def update_data(worksheet, df):
-    try:
-        conn.update(spreadsheet=SHEET_URL, worksheet=worksheet, data=df)
-        if worksheet == "Products":
-            get_products_data.clear()
-        if worksheet == "BrandRules":
-            get_brand_rules.clear()
-    except Exception as e:
-        if "429" in str(e):
-            st.warning("系統繁忙，正在重試...")
-            time.sleep(3)
-            try:
-                conn.update(spreadsheet=SHEET_URL, worksheet=worksheet, data=df)
-                st.success("重試成功！")
-            except:
-                st.error("儲存失敗，請稍後再試")
-        else:
-            st.error(f"儲存失敗: {e}")
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            conn.update(spreadsheet=SHEET_URL, worksheet=worksheet, data=df)
+            if worksheet == "Products":
+                get_products_data.clear()
+            if worksheet == "BrandRules":
+                get_brand_rules.clear()
+            return 
+        except Exception as e:
+            if "429" in str(e):
+                wait_time = (2 ** attempt) + 2
+                if attempt == 0:
+                    st.warning("系統繁忙，正在排隊寫入資料...")
+                time.sleep(wait_time)
+            else:
+                st.error(f"儲存失敗: {e}")
+                return
 
 def convert_drive_url(url):
     if pd.isna(url) or not isinstance(url, str): 
@@ -519,7 +530,8 @@ def main_app(user):
                         if "未付款" in status_str: status_icon += "🔴"
                         elif "已付款" in status_str: status_icon += "💰"
 
-                        expander_title = f"{status_icon} [{status_str}] {row['Order_Time']} | ${row['Total']}"
+                        # [修正] 歷史訂單這裡的標題也改成 | 符號
+                        expander_title = f"{status_icon} {status_str} | {row['Order_Time']} | ${row['Total']}"
                         with st.expander(expander_title):
                             st.markdown(f"### 狀態: {display_status_badges(row['Status'])}", unsafe_allow_html=True)
                             st.divider()
@@ -561,17 +573,14 @@ def main_app(user):
             st.markdown(f"**地址:** {user['Address']}")
             st.divider()
             
-            # [新增] 修改聯絡 Email 的區域
             st.subheader("📬 通知設定")
             with st.form("update_email_form"):
-                # 取得目前的聯絡 Email，若無則為空
                 current_contact_email = str(user.get('Contact_Email', '')).replace('nan', '')
                 new_contact_email = st.text_input("接收訂單通知的 Email", value=current_contact_email, help="我們會將訂單確認信寄到這個信箱")
                 
                 if st.form_submit_button("更新 Email 設定", type="primary"):
                     try:
                         users_df = get_data("Users")
-                        # 確保欄位存在
                         if 'Contact_Email' not in users_df.columns:
                             users_df['Contact_Email'] = ""
                         
@@ -580,8 +589,6 @@ def main_app(user):
                             idx = user_idx[0]
                             users_df.at[idx, 'Contact_Email'] = new_contact_email
                             update_data("Users", users_df)
-                            
-                            # 更新 session state
                             st.session_state['user']['Contact_Email'] = new_contact_email
                             st.success("✅ Email 設定已更新！")
                             time.sleep(1)
@@ -653,7 +660,8 @@ def main_app(user):
                             elif "已付款" in status_str: status_icon += "💰"
 
                             status_badges = display_status_badges(row['Status'])
-                            expander_title = f"{status_icon} 【{status_str}】 {row['Order_Time']} - {row['Customer_Name']} (${row['Total']})"
+                            # [修正] 標題格式改為使用 | 符號，解決文字重疊問題
+                            expander_title = f"{status_icon} {status_str} | {row['Order_Time']} | {row['Customer_Name']} (${row['Total']})"
                             
                             with st.expander(expander_title):
                                 st.markdown(f"### 目前狀態: {status_badges}", unsafe_allow_html=True)
@@ -805,7 +813,6 @@ def main_app(user):
                     st.write("目前讀取到的欄位:", users_df.columns.tolist())
                     st.info("請檢查 Google Sheets 'Users' 分頁的第一列標題。")
                 else:
-                    # 確保新欄位存在
                     if 'Allowed_Brands' not in users_df.columns: users_df['Allowed_Brands'] = ""
                     if 'Contact_Email' not in users_df.columns: users_df['Contact_Email'] = ""
                     
@@ -813,7 +820,6 @@ def main_app(user):
                     users_df['Contact_Email'] = users_df['Contact_Email'].astype(str).replace('nan', '')
 
                     st.markdown("##### 目前權限總覽")
-                    # [修改] 顯示 Contact_Email
                     st.dataframe(
                         users_df[['Username', 'Dealer_Name', 'Contact_Email', 'Allowed_Brands']], 
                         use_container_width=True, 
@@ -827,7 +833,6 @@ def main_app(user):
                     
                     with c_edit_1:
                         target_user = st.selectbox("選擇要修改的用戶", users_df['Username'].unique())
-                        # [新增] 讓管理員可以直接修改 Contact_Email
                         current_row = users_df[users_df['Username'] == target_user].iloc[0]
                         admin_edit_email = st.text_input("聯絡 Email", value=str(current_row['Contact_Email']))
 
@@ -859,7 +864,7 @@ def main_app(user):
                             
                             idx = users_df[users_df['Username'] == target_user].index[0]
                             users_df.at[idx, 'Allowed_Brands'] = final_str
-                            users_df.at[idx, 'Contact_Email'] = admin_edit_email # 儲存 Email
+                            users_df.at[idx, 'Contact_Email'] = admin_edit_email 
                             
                             update_data("Users", users_df)
                             st.success(f"✅ 用戶 {target_user} 資料已更新！")
@@ -1071,10 +1076,9 @@ def main_app(user):
                     client_name = st.session_state.get('editing_customer_info', {}).get('Customer_Name', 'Unknown')
                     st.warning(f"🔧 正在修改客戶 [{client_name}] 的訂單：{st.session_state.editing_order_id}")
                 else: 
-                    # [新增] 結帳前 Email 輸入框
+                    # 結帳前 Email 輸入框
                     st.markdown("---")
                     
-                    # 預設抓取使用者的 Contact_Email，如果沒有則嘗試抓取 Username (如果是Email格式)
                     default_checkout_email = str(user.get('Contact_Email', '')).replace('nan', '')
                     if not default_checkout_email and "@" in str(user['Username']):
                         default_checkout_email = user['Username']
@@ -1083,7 +1087,7 @@ def main_app(user):
                     
                     btn_text = "CHECKOUT / 送出訂單"
 
-                # [修改] 按鈕啟用邏輯：如果是結帳模式，必須填寫 Email 才能按
+                # 按鈕啟用邏輯
                 disable_btn = (not is_editing) and (not contact_email_input)
                 
                 if st.button(btn_text, type="primary", use_container_width=True, disabled=disable_btn):
@@ -1101,7 +1105,7 @@ def main_app(user):
                         c_phone = user['Phone']
                         c_status = "待處理"
                         
-                        # [新增] 如果使用者填了新的 Email，順便更新回使用者資料庫 (Optional UX)
+                        # 自動更新使用者 Email
                         try:
                             if c_email != str(user.get('Contact_Email', '')):
                                 users_d = get_data("Users")
