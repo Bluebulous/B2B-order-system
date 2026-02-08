@@ -4,48 +4,48 @@ from streamlit_gsheets import GSheetsConnection
 from datetime import datetime
 import json
 import time
-import random  # [新增] 用於隨機等待時間
+import random  # [Added] For random wait times
 
-# Email 相關模組
+# Email related modules
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
-# --- 1. 系統設定 ---
+# --- 1. System Configuration ---
 st.set_page_config(
     page_title="Bluebulous B2B",
     layout="wide",
     page_icon="https://raw.githubusercontent.com/Bluebulous/product-images/main/Bluebulous%20logo.jpg"
 )
 
-# Google Sheets 連線
+# Google Sheets Connection
 conn = st.connection("gsheets", type=GSheetsConnection)
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1nuIdMqrRKhWIbuqsz0eVwKYr24HLDDdV7CNn_SPiSYI/edit"
 
-# B2B 基礎規則
+# B2B Basic Rules
 TAX_RATE = 0.05
 SHIPPING_FEE = 125
 
-# 定義管理員帳號
+# Admin Accounts Definition
 ADMIN_USERS = ["admin", "bluebulous", "test@test.com"] 
 
-# --- 2. CSS 樣式 ---
+# --- 2. CSS Styles ---
 st.markdown(
     """
 <style>
-    /* 1. 全站深色背景 */
+    /* 1. Global Dark Background */
     .stApp {
         background-color: #1e1e1e;
         color: #ffffff;
     }
     
-    /* 2. Header 設定 */
+    /* 2. Header Settings */
     header[data-testid="stHeader"] {
         background-color: #1e1e1e;
         color: white;
     }
     
-    /* 3. 白色卡片容器 */
+    /* 3. White Card Container */
     div[data-testid="stVerticalBlockBorderWrapper"] {
         background-color: #ffffff;
         border: 1px solid #e0e0e0;
@@ -53,7 +53,7 @@ st.markdown(
         padding: 20px;
     }
     
-    /* 4. 強制白色卡片內的文字為黑色 */
+    /* 4. Force Text inside White Cards to be Black */
     div[data-testid="stVerticalBlockBorderWrapper"] p,
     div[data-testid="stVerticalBlockBorderWrapper"] h1,
     div[data-testid="stVerticalBlockBorderWrapper"] h2,
@@ -65,7 +65,7 @@ st.markdown(
         color: #000000 !important;
     }
 
-    /* 5. Selectbox & Input 樣式 */
+    /* 5. Selectbox & Input Styles */
     div[data-baseweb="select"] > div, div[data-baseweb="input"] > div, div[data-baseweb="textarea"] > div {
         background-color: #f0f2f6 !important;
         color: #000000 !important;
@@ -78,7 +78,7 @@ st.markdown(
         color: #000000 !important;
     }
     
-    /* 6. 按鈕樣式 (側邊欄) */
+    /* 6. Sidebar Button Styles */
     section[data-testid="stSidebar"] button {
         background-color: transparent !important;
         color: #cccccc !important;
@@ -94,7 +94,7 @@ st.markdown(
         background-color: #2b2b2b !important;
     }
     
-    /* 7. 卡片內按鈕樣式 (產品名稱 & 購物車按鈕) */
+    /* 7. Card Button Styles (Product Name & Cart Buttons) */
     div[data-testid="stVerticalBlockBorderWrapper"] button[kind="secondary"] {
         border: none !important;            
         background-color: transparent !important; 
@@ -122,7 +122,7 @@ st.markdown(
         color: #ff5000 !important;
     }
 
-    /* 主要按鈕 (ADD / CHECKOUT) */
+    /* Primary Buttons (ADD / CHECKOUT) */
     button[kind="primary"] {
         background-color: #ff5500 !important;
         border: none !important;
@@ -138,7 +138,7 @@ st.markdown(
         color: white !important; 
     }
     
-    /* 狀態標籤樣式 */
+    /* Status Badge Styles */
     .status-badge {
         display: inline-block;
         padding: 2px 8px;
@@ -154,7 +154,7 @@ st.markdown(
     .badge-done { background-color: #2c3e50; }
     .badge-unpaid { background-color: #c0392b; }
 
-    /* === 📱 手機版專用優化 === */
+    /* === 📱 Mobile Optimization === */
     @media only screen and (max-width: 768px) {
         .block-container {
             padding-top: 1rem !important;
@@ -180,27 +180,35 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# --- 3. 輔助函數 ---
+# --- 3. Helper Functions ---
 
-# [修正 429] 延長快取至 3600 秒，並使用指數退避重試
+# [Fixed 429] Increased cache TTL to 3600s, added exponential backoff retry logic
 @st.cache_data(ttl=3600)
 def get_products_data():
-    max_retries = 5 # 增加重試次數
+    max_retries = 5 # Increased retry attempts
     for attempt in range(max_retries):
         try:
             df = conn.read(spreadsheet=SHEET_URL, worksheet="Products")
             df.columns = df.columns.str.strip()
-            # 清除所有文字欄位的前後空白 (Fix: Freemotion size issue)
+            # Clean matching columns specifically
+            if 'Size' in df.columns:
+                df['Size'] = df['Size'].astype(str).str.strip()
+            if 'Name' in df.columns:
+                df['Name'] = df['Name'].astype(str).str.strip()
+            if 'Color' in df.columns:
+                df['Color'] = df['Color'].astype(str).str.strip()
+                
+            # General cleaning for other object columns
             df = df.apply(lambda x: x.str.strip() if x.dtype == "object" else x)
             return df
         except Exception as e:
             if "429" in str(e) or "Quota exceeded" in str(e):
-                # 指數退避: 2s -> 4s -> 8s -> 16s... + 隨機緩衝
+                # Exponential backoff: 2s -> 4s -> 8s -> 16s... + random jitter
                 wait_time = (2 ** attempt) + random.random()
                 if attempt < max_retries - 1:
                     time.sleep(wait_time) 
                     continue
-            st.error(f"無法讀取產品資料 (請稍後再試): {e}")
+            st.error(f"无法讀取產品資料 (請稍後再試): {e}")
             return pd.DataFrame()
     return pd.DataFrame()
 
@@ -223,7 +231,7 @@ def get_brand_rules():
         default_df = pd.DataFrame([{"Brand": "default", "Wholesale_Threshold": 10000, "Shipping_Threshold": 10000, "Discount": 0.7}])
         return {"default": {"wholesale_threshold": 10000, "shipping_threshold": 10000, "discount_rate": 0.7}}, default_df
 
-# [修正 429] 一般讀取也加入強效重試
+# [Fixed 429] General data read with strong retry mechanism
 def get_data(worksheet, ttl=0):
     max_retries = 5
     for attempt in range(max_retries):
@@ -916,7 +924,7 @@ def main_app(user):
             for i, (_, sku) in enumerate(variants.iterrows()):
                 c_row = st.container()
                 c1, c2, c3, c4, c5 = c_row.columns([1.2, 2.2, 1.5, 1.5, 1.5], vertical_alignment="center")
-                with c1: st.markdown(f"<div style='font-weight:bold;'>{sku['Size']}</div>", unsafe_allow_html=True)
+                with c1: st.markdown(f"<div style='font-weight:bold;'>{str(sku['Size'])}</div>", unsafe_allow_html=True)
                 with c2:
                     qty_key = f"qty_input_{sku['Product_ID']}_{selected_color}_{i}"
                     st.number_input("Qty", min_value=1, value=1, step=1, key=qty_key, label_visibility="collapsed")
@@ -925,7 +933,7 @@ def main_app(user):
                 with c5:
                     st.button("ADD", key=f"add_{sku['Product_ID']}_{selected_color}_{i}", type="primary", use_container_width=True,
                         on_click=add_to_cart_callback,
-                        args=(sku['Product_ID'], current_name, f"{selected_color} / {sku['Size']}", sku['Wholesale_Price'], sku['Retail_Price'], qty_key, current_product_data.iloc[0]['Brand']))
+                        args=(sku['Product_ID'], current_name, f"{selected_color} / {str(sku['Size'])}", sku['Wholesale_Price'], sku['Retail_Price'], qty_key, current_product_data.iloc[0]['Brand']))
 
     with col_visual:
         with st.container(border=True):
@@ -1076,7 +1084,7 @@ def main_app(user):
                     client_name = st.session_state.get('editing_customer_info', {}).get('Customer_Name', 'Unknown')
                     st.warning(f"🔧 正在修改客戶 [{client_name}] 的訂單：{st.session_state.editing_order_id}")
                 else: 
-                    # 結帳前 Email 輸入框
+                    # Email input before checkout
                     st.markdown("---")
                     
                     default_checkout_email = str(user.get('Contact_Email', '')).replace('nan', '')
@@ -1087,7 +1095,7 @@ def main_app(user):
                     
                     btn_text = "CHECKOUT / 送出訂單"
 
-                # 按鈕啟用邏輯
+                # Button enable logic
                 disable_btn = (not is_editing) and (not contact_email_input)
                 
                 if st.button(btn_text, type="primary", use_container_width=True, disabled=disable_btn):
@@ -1095,17 +1103,17 @@ def main_app(user):
                         order_id = st.session_state.editing_order_id
                         saved_info = st.session_state.get('editing_customer_info', {})
                         c_name = saved_info.get('Customer_Name', user['Dealer_Name'])
-                        c_email = saved_info.get('Email', user['Username']) # 編輯模式沿用舊 Email
+                        c_email = saved_info.get('Email', user['Username']) # Edit mode uses old email
                         c_phone = saved_info.get('Phone', user['Phone'])
                         c_status = "賣方已修改"
                     else:
                         order_id = f"ORD-{datetime.now().strftime('%Y%m%d%H%M%S')}"
                         c_name = user['Dealer_Name']
-                        c_email = contact_email_input # 使用輸入框的 Email
+                        c_email = contact_email_input # Use input email
                         c_phone = user['Phone']
                         c_status = "待處理"
                         
-                        # 自動更新使用者 Email
+                        # Automatically update user email
                         try:
                             if c_email != str(user.get('Contact_Email', '')):
                                 users_d = get_data("Users")
