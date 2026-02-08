@@ -4,48 +4,48 @@ from streamlit_gsheets import GSheetsConnection
 from datetime import datetime
 import json
 import time
-import random  # [Added] For random wait times
+import random
 
-# Email related modules
+# Email 相關模組
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
-# --- 1. System Configuration ---
+# --- 1. 系統設定 ---
 st.set_page_config(
     page_title="Bluebulous B2B",
     layout="wide",
     page_icon="https://raw.githubusercontent.com/Bluebulous/product-images/main/Bluebulous%20logo.jpg"
 )
 
-# Google Sheets Connection
+# Google Sheets 連線
 conn = st.connection("gsheets", type=GSheetsConnection)
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1nuIdMqrRKhWIbuqsz0eVwKYr24HLDDdV7CNn_SPiSYI/edit"
 
-# B2B Basic Rules
+# B2B 基礎規則
 TAX_RATE = 0.05
 SHIPPING_FEE = 125
 
-# Admin Accounts Definition
+# 定義管理員帳號
 ADMIN_USERS = ["admin", "bluebulous", "test@test.com"] 
 
-# --- 2. CSS Styles ---
+# --- 2. CSS 樣式 ---
 st.markdown(
     """
 <style>
-    /* 1. Global Dark Background */
+    /* 1. 全站深色背景 */
     .stApp {
         background-color: #1e1e1e;
         color: #ffffff;
     }
     
-    /* 2. Header Settings */
+    /* 2. Header 設定 */
     header[data-testid="stHeader"] {
         background-color: #1e1e1e;
         color: white;
     }
     
-    /* 3. White Card Container */
+    /* 3. 白色卡片容器 */
     div[data-testid="stVerticalBlockBorderWrapper"] {
         background-color: #ffffff;
         border: 1px solid #e0e0e0;
@@ -53,7 +53,7 @@ st.markdown(
         padding: 20px;
     }
     
-    /* 4. Force Text inside White Cards to be Black */
+    /* 4. 強制白色卡片內的文字為黑色 */
     div[data-testid="stVerticalBlockBorderWrapper"] p,
     div[data-testid="stVerticalBlockBorderWrapper"] h1,
     div[data-testid="stVerticalBlockBorderWrapper"] h2,
@@ -65,7 +65,7 @@ st.markdown(
         color: #000000 !important;
     }
 
-    /* 5. Selectbox & Input Styles */
+    /* 5. Selectbox & Input 樣式 */
     div[data-baseweb="select"] > div, div[data-baseweb="input"] > div, div[data-baseweb="textarea"] > div {
         background-color: #f0f2f6 !important;
         color: #000000 !important;
@@ -78,7 +78,7 @@ st.markdown(
         color: #000000 !important;
     }
     
-    /* 6. Sidebar Button Styles */
+    /* 6. 按鈕樣式 (側邊欄) */
     section[data-testid="stSidebar"] button {
         background-color: transparent !important;
         color: #cccccc !important;
@@ -94,7 +94,7 @@ st.markdown(
         background-color: #2b2b2b !important;
     }
     
-    /* 7. Card Button Styles (Product Name & Cart Buttons) */
+    /* 7. 卡片內按鈕樣式 (產品名稱 & 購物車按鈕) */
     div[data-testid="stVerticalBlockBorderWrapper"] button[kind="secondary"] {
         border: none !important;            
         background-color: transparent !important; 
@@ -122,7 +122,7 @@ st.markdown(
         color: #ff5000 !important;
     }
 
-    /* Primary Buttons (ADD / CHECKOUT) */
+    /* 主要按鈕 (ADD / CHECKOUT) */
     button[kind="primary"] {
         background-color: #ff5500 !important;
         border: none !important;
@@ -138,7 +138,7 @@ st.markdown(
         color: white !important; 
     }
     
-    /* Status Badge Styles */
+    /* 狀態標籤樣式 */
     .status-badge {
         display: inline-block;
         padding: 2px 8px;
@@ -154,7 +154,7 @@ st.markdown(
     .badge-done { background-color: #2c3e50; }
     .badge-unpaid { background-color: #c0392b; }
 
-    /* === 📱 Mobile Optimization === */
+    /* === 📱 手機版專用優化 === */
     @media only screen and (max-width: 768px) {
         .block-container {
             padding-top: 1rem !important;
@@ -180,35 +180,36 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# --- 3. Helper Functions ---
+# --- 3. 輔助函數 ---
 
-# [Fixed 429] Increased cache TTL to 3600s, added exponential backoff retry logic
 @st.cache_data(ttl=3600)
 def get_products_data():
-    max_retries = 5 # Increased retry attempts
+    max_retries = 5 
     for attempt in range(max_retries):
         try:
             df = conn.read(spreadsheet=SHEET_URL, worksheet="Products")
             df.columns = df.columns.str.strip()
-            # Clean matching columns specifically
+            # 資料清洗：確保都是字串且無前後空白
             if 'Size' in df.columns:
                 df['Size'] = df['Size'].astype(str).str.strip()
             if 'Name' in df.columns:
                 df['Name'] = df['Name'].astype(str).str.strip()
             if 'Color' in df.columns:
                 df['Color'] = df['Color'].astype(str).str.strip()
+            if 'Category' in df.columns:
+                df['Category'] = df['Category'].astype(str).str.strip()
+            if 'Brand' in df.columns:
+                df['Brand'] = df['Brand'].astype(str).str.strip()
                 
-            # General cleaning for other object columns
             df = df.apply(lambda x: x.str.strip() if x.dtype == "object" else x)
             return df
         except Exception as e:
             if "429" in str(e) or "Quota exceeded" in str(e):
-                # Exponential backoff: 2s -> 4s -> 8s -> 16s... + random jitter
                 wait_time = (2 ** attempt) + random.random()
                 if attempt < max_retries - 1:
                     time.sleep(wait_time) 
                     continue
-            st.error(f"无法讀取產品資料 (請稍後再試): {e}")
+            st.error(f"無法讀取產品資料 (請稍後再試): {e}")
             return pd.DataFrame()
     return pd.DataFrame()
 
@@ -231,7 +232,6 @@ def get_brand_rules():
         default_df = pd.DataFrame([{"Brand": "default", "Wholesale_Threshold": 10000, "Shipping_Threshold": 10000, "Discount": 0.7}])
         return {"default": {"wholesale_threshold": 10000, "shipping_threshold": 10000, "discount_rate": 0.7}}, default_df
 
-# [Fixed 429] General data read with strong retry mechanism
 def get_data(worksheet, ttl=0):
     max_retries = 5
     for attempt in range(max_retries):
@@ -303,27 +303,6 @@ def display_status_badges(status_str):
         css_class = keywords.get(p, "badge-pending")
         badges_html += f'<span class="status-badge {css_class}">{p}</span>'
     return badges_html
-
-def calculate_new_status(current_status, new_action_group, new_action_value):
-    G1_LOGISTICS = ["處理中", "已出貨", "已部分出貨", "待處理"]
-    G2_PAYMENT = ["未付款", "已付款"]
-    
-    if pd.isna(current_status): current_status = ""
-    current_parts = [p.strip() for p in str(current_status).replace("，", ",").split(",") if p.strip()]
-    
-    if new_action_group == "G3": return "已完成"
-    if "已完成" in current_parts: current_parts = [] 
-
-    new_parts = []
-    if new_action_group == "G1":
-        new_parts.append(new_action_value)
-        for p in current_parts:
-            if p in G2_PAYMENT: new_parts.append(p)
-    elif new_action_group == "G2":
-        new_parts.append(new_action_value)
-        for p in current_parts:
-            if p in G1_LOGISTICS: new_parts.append(p)
-    return ", ".join(new_parts)
 
 def send_order_email(order_data, cart_items, is_update=False):
     SMTP_SERVER = "smtp.gmail.com"
@@ -420,6 +399,7 @@ def main_app(user):
     if 'editing_order_id' not in st.session_state: st.session_state.editing_order_id = None
     if 'editing_customer_info' not in st.session_state: st.session_state.editing_customer_info = None
     
+    # 嘗試讀取產品資料
     try:
         df_products = get_products_data()
         
@@ -429,11 +409,7 @@ def main_app(user):
 
         if 'Wholesale_Price' in df_products.columns:
             df_products['Wholesale_Price'] = pd.to_numeric(df_products['Wholesale_Price'], errors='coerce').fillna(0)
-        else:
-            st.error("錯誤：找不到 'Wholesale_Price' 欄位，請檢查 Google Sheet 標題列是否正確。")
-            st.write("目前欄位:", df_products.columns.tolist())
-            return
-
+        
         if 'Retail_Price' in df_products.columns:
             df_products['Retail_Price'] = pd.to_numeric(df_products['Retail_Price'], errors='coerce').fillna(0)
         
@@ -538,7 +514,6 @@ def main_app(user):
                         if "未付款" in status_str: status_icon += "🔴"
                         elif "已付款" in status_str: status_icon += "💰"
 
-                        # [修正] 歷史訂單這裡的標題也改成 | 符號
                         expander_title = f"{status_icon} {status_str} | {row['Order_Time']} | ${row['Total']}"
                         with st.expander(expander_title):
                             st.markdown(f"### 狀態: {display_status_badges(row['Status'])}", unsafe_allow_html=True)
@@ -643,7 +618,8 @@ def main_app(user):
             return
 
         st.title("🔧 管理員後台")
-        tab1, tab2, tab3 = st.tabs(["📦 訂單管理", "⚙️ 品牌門檻設定", "👥 用戶權限管理"])
+        # [修改] 新增第四個 Tab: 銷售數據分析
+        tab1, tab2, tab3, tab4 = st.tabs(["📦 訂單管理", "⚙️ 品牌門檻設定", "👥 用戶權限管理", "📊 銷售數據中心"])
         
         with tab1:
             with st.container(border=True):
@@ -668,7 +644,6 @@ def main_app(user):
                             elif "已付款" in status_str: status_icon += "💰"
 
                             status_badges = display_status_badges(row['Status'])
-                            # [修正] 標題格式改為使用 | 符號，解決文字重疊問題
                             expander_title = f"{status_icon} {status_str} | {row['Order_Time']} | {row['Customer_Name']} (${row['Total']})"
                             
                             with st.expander(expander_title):
@@ -818,8 +793,6 @@ def main_app(user):
                 
                 if missing_cols:
                     st.error(f"❌ Google Sheet 資料表缺少欄位: {missing_cols}")
-                    st.write("目前讀取到的欄位:", users_df.columns.tolist())
-                    st.info("請檢查 Google Sheets 'Users' 分頁的第一列標題。")
                 else:
                     if 'Allowed_Brands' not in users_df.columns: users_df['Allowed_Brands'] = ""
                     if 'Contact_Email' not in users_df.columns: users_df['Contact_Email'] = ""
@@ -883,6 +856,111 @@ def main_app(user):
 
             except Exception as e:
                 st.error(f"讀取用戶資料失敗: {e}")
+
+        # [新增] 第四個 Tab: 銷售數據中心
+        with tab4:
+            st.subheader("📊 數據戰情室")
+            st.info("💡 這裡展示即時的銷售數據分析，協助您判斷通路價值與熱銷商品。")
+            
+            try:
+                orders = get_data("Orders")
+                if orders.empty:
+                    st.warning("目前沒有訂單數據可供分析。")
+                else:
+                    # 1. 資料前處理
+                    orders['Order_Date'] = pd.to_datetime(orders['Order_Time'])
+                    orders['Month'] = orders['Order_Date'].dt.strftime('%Y-%m')
+                    orders['Total'] = pd.to_numeric(orders['Total'], errors='coerce').fillna(0)
+                    
+                    # 取得產品資料以供對照 (分類 mapping)
+                    df_prods = get_products_data()
+                    prod_cat_map = {}
+                    if not df_prods.empty and 'Name' in df_prods.columns and 'Category' in df_prods.columns:
+                        prod_cat_map = dict(zip(df_prods['Name'], df_prods['Category']))
+
+                    # 解析所有訂單的 Items
+                    all_items_list = []
+                    for _, row in orders.iterrows():
+                        try:
+                            items = json.loads(row['Items_Json'])
+                            for item in items.values():
+                                all_items_list.append({
+                                    'Order_ID': row['Order_ID'],
+                                    'Dealer': row['Customer_Name'],
+                                    'Month': row['Order_Date'].strftime('%Y-%m'),
+                                    'Brand': item.get('brand', 'Unknown'),
+                                    'Product': item.get('name', 'Unknown'),
+                                    'Category': prod_cat_map.get(item.get('name'), 'Unknown'), # 嘗試對應分類
+                                    'Qty': int(item.get('qty', 0)),
+                                    'Subtotal': int(item.get('final_subtotal', 0))
+                                })
+                        except: pass
+                    
+                    df_items = pd.DataFrame(all_items_list)
+
+                    # 2. KPI 指標卡
+                    total_rev = int(orders['Total'].sum())
+                    total_orders = len(orders)
+                    avg_order_value = int(total_rev / total_orders) if total_orders > 0 else 0
+                    
+                    k1, k2, k3 = st.columns(3)
+                    k1.metric("💰 總營業額 (Total Revenue)", f"${total_rev:,}")
+                    k2.metric("📦 總訂單數 (Total Orders)", f"{total_orders}")
+                    k3.metric("📈 平均客單價 (AOV)", f"${avg_order_value:,}")
+                    
+                    st.divider()
+
+                    # 3. 圖表分析區
+                    c_chart1, c_chart2 = st.columns(2)
+                    
+                    with c_chart1:
+                        st.markdown("##### 🏆 經銷商貢獻度排行 (Top Dealers)")
+                        dealer_sales = orders.groupby('Customer_Name')['Total'].sum().sort_values(ascending=False).head(10)
+                        st.bar_chart(dealer_sales, color="#ff5500")
+                        st.caption("前 10 名貢獻營收最高的經銷商")
+
+                    with c_chart2:
+                        st.markdown("##### 📅 每月營收走勢 (Monthly Revenue)")
+                        monthly_sales = orders.groupby('Month')['Total'].sum()
+                        st.line_chart(monthly_sales, color="#3498db")
+                        st.caption("觀察銷售季節性變化")
+
+                    st.divider()
+                    
+                    c_chart3, c_chart4 = st.columns(2)
+                    
+                    if not df_items.empty:
+                        with c_chart3:
+                            st.markdown("##### 🏷️ 品牌銷售佔比 (Sales by Brand)")
+                            brand_sales = df_items.groupby('Brand')['Subtotal'].sum().sort_values(ascending=False)
+                            st.bar_chart(brand_sales, horizontal=True) # 橫向長條圖更適合閱讀品牌名
+
+                        with c_chart4:
+                            st.markdown("##### 📂 產品分類佔比 (Sales by Category)")
+                            cat_sales = df_items.groupby('Category')['Subtotal'].sum().sort_values(ascending=False)
+                            st.bar_chart(cat_sales, color="#2ecc71")
+                    
+                    st.divider()
+                    
+                    # 4. 熱銷商品排行 (詳細表格)
+                    st.markdown("##### 🔥 熱銷商品 TOP 20")
+                    if not df_items.empty:
+                        top_products = df_items.groupby(['Product', 'Brand', 'Category'])[['Qty', 'Subtotal']].sum().reset_index()
+                        top_products = top_products.sort_values('Subtotal', ascending=False).head(20)
+                        st.dataframe(
+                            top_products,
+                            column_config={
+                                "Subtotal": st.column_config.NumberColumn("銷售總額", format="$%d"),
+                                "Qty": st.column_config.NumberColumn("銷售數量"),
+                            },
+                            use_container_width=True,
+                            hide_index=True
+                        )
+                    else:
+                        st.info("尚無商品銷售細節數據")
+
+            except Exception as e:
+                st.error(f"數據分析載入失敗: {e}")
 
         return
 
