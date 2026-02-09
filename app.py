@@ -122,7 +122,7 @@ st.markdown(
         color: #ff5000 !important;
     }
 
-    /* Primary Buttons (ADD / CHECKOUT) */
+    /* 主要按鈕 (ADD / CHECKOUT) */
     button[kind="primary"] {
         background-color: #ff5500 !important;
         border: none !important;
@@ -138,7 +138,7 @@ st.markdown(
         color: white !important; 
     }
     
-    /* Status Badge Styles */
+    /* 狀態標籤樣式 */
     .status-badge {
         display: inline-block;
         padding: 2px 8px;
@@ -154,14 +154,10 @@ st.markdown(
     .badge-done { background-color: #2c3e50; }
     .badge-unpaid { background-color: #c0392b; }
 
-    /* === 🛒 購物車按鈕專用優化 (解決重疊問題) === */
-    /* 針對購物車區域的按鈕進行強制瘦身 */
-    div[data-testid="stVerticalBlockBorderWrapper"] .stButton > button {
-        padding-left: 0px !important;
-        padding-right: 0px !important;
-        width: 100% !important;
-        min-width: 0px !important;
-        border-radius: 4px !important;
+    /* === 購物車專用微調 === */
+    /* 讓購物車內的 Number Input 稍微緊湊一點 */
+    div[data-testid="stVerticalBlockBorderWrapper"] div[data-baseweb="input"] {
+        min-height: 35px !important;
     }
 
     /* === 📱 手機版專用優化 === */
@@ -416,7 +412,11 @@ def main_app(user):
 
         if 'Wholesale_Price' in df_products.columns:
             df_products['Wholesale_Price'] = pd.to_numeric(df_products['Wholesale_Price'], errors='coerce').fillna(0)
-        
+        else:
+            st.error("錯誤：找不到 'Wholesale_Price' 欄位，請檢查 Google Sheet 標題列是否正確。")
+            st.write("目前欄位:", df_products.columns.tolist())
+            return
+
         if 'Retail_Price' in df_products.columns:
             df_products['Retail_Price'] = pd.to_numeric(df_products['Retail_Price'], errors='coerce').fillna(0)
         
@@ -1045,6 +1045,13 @@ def main_app(user):
                                 st.rerun()
             if not others: st.caption("此分類下無其他商品")
 
+    # [購物車邏輯]
+    def update_item_qty(item_id):
+        # 綁定給 number_input 的 callback
+        new_val = st.session_state[f"cart_qty_{item_id}"]
+        if item_id in st.session_state.cart:
+            st.session_state.cart[item_id]['qty'] = new_val
+
     with col_cart:
         with st.container(border=True):
             st.markdown("<h3 style='font-size: 20px; font-weight: bold;'>🛒 購物車</h3>", unsafe_allow_html=True)
@@ -1113,35 +1120,32 @@ def main_app(user):
                         st.warning(msg, icon="⚠️")
 
                     for item in data['items']:
-                        # [Modified Layout with Buttons and CSS] 
-                        c_name, c_minus, c_qty, c_plus, c_del, c_price = st.columns([2.5, 0.5, 0.5, 0.5, 0.5, 1.2], vertical_alignment="center")
+                        # [修改重點] 4 欄配置，使用 number_input 取代舊按鈕
+                        c_name, c_qty, c_del, c_price = st.columns([2.8, 1.2, 0.5, 1.0], vertical_alignment="center")
                         
                         with c_name:
-                            # Product Name and Spec (Color/Size)
+                            # 品名 + 規格 (顏色/尺寸)
                             st.markdown(f"<div style='line-height:1.2; font-weight:bold;'>{item['name']}</div><div style='color:#cccccc; font-size:12px; margin-top:2px;'>{item['spec']}</div>", unsafe_allow_html=True)
                         
-                        with c_minus:
-                            if st.button("➖", key=f"cart_min_{item['id']}", type="secondary"):
-                                item['qty'] -= 1
-                                if item['qty'] <= 0: del st.session_state.cart[item['id']]
-                                st.rerun()
-                        
                         with c_qty:
-                            st.markdown(f"<div style='text-align:center; font-size:14px; font-weight:bold;'>{item['qty']}</div>", unsafe_allow_html=True)
-
-                        with c_plus:
-                            if st.button("➕", key=f"cart_plus_{item['id']}", type="secondary"):
-                                item['qty'] += 1
-                                st.rerun()
+                            # [關鍵修改] 這裡就是你要的 "白色框+深色按鈕" 原生元件
+                            st.number_input(
+                                "Qty",
+                                min_value=1,
+                                value=int(item['qty']),
+                                step=1,
+                                key=f"cart_qty_{item['id']}",
+                                label_visibility="collapsed",
+                                on_change=update_item_qty, # 綁定更新函式
+                                args=(item['id'],)
+                            )
                         
                         with c_del:
-                            # Delete Button
                             if st.button("✖", key=f"cart_del_{item['id']}", type="secondary", help="移除此商品"):
                                 del st.session_state.cart[item['id']]
                                 st.rerun()
                         
                         with c_price:
-                            # Price
                             st.markdown(f"<div style='text-align:right; font-weight:bold;'>${item['final_subtotal']}</div>", unsafe_allow_html=True)
                     st.divider()
 
