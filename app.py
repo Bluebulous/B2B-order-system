@@ -155,9 +155,13 @@ st.markdown(
     .badge-unpaid { background-color: #c0392b; }
 
     /* === 購物車專用微調 === */
-    /* 讓購物車內的 Number Input 稍微緊湊一點 */
+    /* 確保輸入框高度一致，不要太小 */
     div[data-testid="stVerticalBlockBorderWrapper"] div[data-baseweb="input"] {
-        min-height: 35px !important;
+        min-height: 40px !important;
+    }
+    /* 讓刪除按鈕垂直置中 */
+    div[data-testid="stVerticalBlockBorderWrapper"] button[kind="secondary"] {
+       margin-top: 2px;
     }
 
     /* === 📱 手機版專用優化 === */
@@ -1045,7 +1049,7 @@ def main_app(user):
                                 st.rerun()
             if not others: st.caption("此分類下無其他商品")
 
-    # [購物車邏輯]
+    # [購物車欄位優化]
     def update_item_qty(item_id):
         # 綁定給 number_input 的 callback
         new_val = st.session_state[f"cart_qty_{item_id}"]
@@ -1120,8 +1124,9 @@ def main_app(user):
                         st.warning(msg, icon="⚠️")
 
                     for item in data['items']:
-                        # [修改重點] 4 欄配置，使用 number_input 取代舊按鈕
-                        c_name, c_qty, c_del, c_price = st.columns([2.8, 1.2, 0.5, 1.0], vertical_alignment="center")
+                        # [修正] 4 欄配置，使用 number_input 取代舊按鈕
+                        # 給 Quantity 1.5 的空間，確保 + - 按鈕不會消失
+                        c_name, c_qty, c_del, c_price = st.columns([2.5, 1.5, 0.5, 1.0], vertical_alignment="center")
                         
                         with c_name:
                             # 品名 + 規格 (顏色/尺寸)
