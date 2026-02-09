@@ -208,7 +208,7 @@ def get_products_data():
                 if attempt < max_retries - 1:
                     time.sleep(wait_time) 
                     continue
-            st.error(f"無法讀取產品資料: {e}")
+            st.error(f"無法讀取產品資料 (請稍後再試): {e}")
             return pd.DataFrame()
     return pd.DataFrame()
 
@@ -237,10 +237,7 @@ def get_data(worksheet, ttl=0):
         try:
             df = conn.read(spreadsheet=SHEET_URL, worksheet=worksheet, ttl=ttl)
             df.columns = df.columns.str.strip()
-            
-            # [重要修正] 強制將所有欄位轉為字串處理，避免數字/空值混亂
-            df = df.apply(lambda x: x.astype(str).str.strip() if x.dtype == "object" else x.astype(str).str.strip())
-            
+            df = df.apply(lambda x: x.str.strip() if x.dtype == "object" else x)
             return df
         except Exception as e:
             if "429" in str(e) or "Quota exceeded" in str(e):
@@ -306,30 +303,10 @@ def display_status_badges(status_str):
         badges_html += f'<span class="status-badge {css_class}">{p}</span>'
     return badges_html
 
-def calculate_new_status(current_status, new_action_group, new_action_value):
-    G1_LOGISTICS = ["處理中", "已出貨", "已部分出貨", "待處理"]
-    G2_PAYMENT = ["未付款", "已付款"]
-    
-    if pd.isna(current_status): current_status = ""
-    current_parts = [p.strip() for p in str(current_status).replace("，", ",").split(",") if p.strip()]
-    
-    if new_action_group == "G3": return "已完成"
-    if "已完成" in current_parts: current_parts = [] 
-
-    new_parts = []
-    if new_action_group == "G1":
-        new_parts.append(new_action_value)
-        for p in current_parts:
-            if p in G2_PAYMENT: new_parts.append(p)
-    elif new_action_group == "G2":
-        new_parts.append(new_action_value)
-        for p in current_parts:
-            if p in G1_LOGISTICS: new_parts.append(p)
-    return ", ".join(new_parts)
-
 def send_order_email(order_data, cart_items, is_update=False):
     SMTP_SERVER = "smtp.gmail.com"
     SMTP_PORT = 587
+    # 請務必確認這裡的 Email 拼字是正確的
     SENDER_EMAIL = "bluebulous.official@gmail.com"
     SENDER_PASSWORD = "mjzm yfwj nbxz nefj"
 
@@ -431,7 +408,11 @@ def main_app(user):
 
         if 'Wholesale_Price' in df_products.columns:
             df_products['Wholesale_Price'] = pd.to_numeric(df_products['Wholesale_Price'], errors='coerce').fillna(0)
-        
+        else:
+            st.error("錯誤：找不到 'Wholesale_Price' 欄位，請檢查 Google Sheet 標題列是否正確。")
+            st.write("目前欄位:", df_products.columns.tolist())
+            return
+
         if 'Retail_Price' in df_products.columns:
             df_products['Retail_Price'] = pd.to_numeric(df_products['Retail_Price'], errors='coerce').fillna(0)
         
@@ -522,7 +503,8 @@ def main_app(user):
                 if 'Tracking_Number' not in orders.columns: orders['Tracking_Number'] = ""
                 if 'Admin_Note' not in orders.columns: orders['Admin_Note'] = ""
                 if 'Extra_Discount' not in orders.columns: orders['Extra_Discount'] = 0 
-                orders['Extra_Discount'] = orders['Extra_Discount'].fillna(0).astype(int) 
+                # [修正] 這裡加入 to_numeric 強制轉換，防止 '0.0' 字串錯誤
+                orders['Extra_Discount'] = pd.to_numeric(orders['Extra_Discount'], errors='coerce').fillna(0).astype(int)
 
                 my_orders = orders[orders['Email'] == user['Username']].sort_values("Order_Time", ascending=False)
                 
@@ -650,7 +632,9 @@ def main_app(user):
                     if 'Tracking_Number' not in orders.columns: orders['Tracking_Number'] = ""
                     if 'Admin_Note' not in orders.columns: orders['Admin_Note'] = ""
                     if 'Extra_Discount' not in orders.columns: orders['Extra_Discount'] = 0
-                    orders['Extra_Discount'] = orders['Extra_Discount'].fillna(0).astype(int)
+                    
+                    # [修正] 這裡也加入 to_numeric 強制轉換，防止 0.0 錯誤
+                    orders['Extra_Discount'] = pd.to_numeric(orders['Extra_Discount'], errors='coerce').fillna(0).astype(int)
 
                     if not orders.empty:
                         all_orders = orders.sort_values("Order_Time", ascending=False)
@@ -1186,10 +1170,9 @@ def main_app(user):
                     client_name = st.session_state.get('editing_customer_info', {}).get('Customer_Name', 'Unknown')
                     st.warning(f"🔧 正在修改客戶 [{client_name}] 的訂單：{st.session_state.editing_order_id}")
                 else: 
-                    # [新增] 結帳前 Email 輸入框
+                    # Email input before checkout
                     st.markdown("---")
                     
-                    # 預設抓取使用者的 Contact_Email，如果沒有則嘗試抓取 Username (如果是Email格式)
                     default_checkout_email = str(user.get('Contact_Email', '')).replace('nan', '')
                     if not default_checkout_email and "@" in str(user['Username']):
                         default_checkout_email = user['Username']
@@ -1198,7 +1181,7 @@ def main_app(user):
                     
                     btn_text = "CHECKOUT / 送出訂單"
 
-                # [修改] 按鈕啟用邏輯：如果是結帳模式，必須填寫 Email 才能按
+                # Button enable logic
                 disable_btn = (not is_editing) and (not contact_email_input)
                 
                 if st.button(btn_text, type="primary", use_container_width=True, disabled=disable_btn):
@@ -1206,17 +1189,17 @@ def main_app(user):
                         order_id = st.session_state.editing_order_id
                         saved_info = st.session_state.get('editing_customer_info', {})
                         c_name = saved_info.get('Customer_Name', user['Dealer_Name'])
-                        c_email = saved_info.get('Email', user['Username']) # 編輯模式沿用舊 Email
+                        c_email = saved_info.get('Email', user['Username']) # Edit mode uses old email
                         c_phone = saved_info.get('Phone', user['Phone'])
                         c_status = "賣方已修改"
                     else:
                         order_id = f"ORD-{datetime.now().strftime('%Y%m%d%H%M%S')}"
                         c_name = user['Dealer_Name']
-                        c_email = contact_email_input # 使用輸入框的 Email
+                        c_email = contact_email_input # Use input email
                         c_phone = user['Phone']
                         c_status = "待處理"
                         
-                        # [新增] 如果使用者填了新的 Email，順便更新回使用者資料庫 (Optional UX)
+                        # Automatically update user email
                         try:
                             if c_email != str(user.get('Contact_Email', '')):
                                 users_d = get_data("Users")
@@ -1285,17 +1268,9 @@ def login_page():
             if st.form_submit_button("Login", use_container_width=True, type="primary"):
                 users = get_data("Users")
                 match = users[users['Username'] == u]
-                if not match.empty:
-                    # [修正] 密碼比對邏輯：轉字串、去空白、忽略 .0
-                    db_pwd = str(match.iloc[0]['Password']).strip()
-                    if db_pwd.endswith(".0"):
-                        db_pwd = db_pwd[:-2]
-                    
-                    if db_pwd == str(p).strip():
-                        st.session_state['user'] = match.iloc[0]
-                        st.rerun()
-                    else:
-                        st.error("帳號或密碼錯誤")
+                if not match.empty and str(match.iloc[0]['Password']) == p:
+                    st.session_state['user'] = match.iloc[0]
+                    st.rerun()
                 else: st.error("帳號或密碼錯誤")
 
 if __name__ == "__main__":
