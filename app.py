@@ -155,13 +155,14 @@ st.markdown(
     .badge-unpaid { background-color: #c0392b; }
 
     /* === 🛒 購物車專用微調 (關鍵修正) === */
-    /* 1. 強制讓 Number Input 顯示為固定寬度 (110px)，解決過長問題 */
-    div[data-testid="stVerticalBlockBorderWrapper"] div[data-testid="stNumberInput"] > div {
-        width: 110px !important; 
-        flex: none !important; /* 禁止自動填滿整個欄位 */
+    /* 1. 強制讓 Number Input 顯示為固定寬度 (120px)，不管欄位有多寬 */
+    /* 這樣我們就可以把欄位設很寬(確保按鈕出現)，但視覺上只有 120px */
+    div[data-testid="stVerticalBlockBorderWrapper"] div[data-testid="stNumberInput"] {
+        width: 120px !important; 
+        min-width: 120px !important;
     }
     
-    /* 2. 確保輸入框高度適中 */
+    /* 2. 確保輸入框內的高度與文字置中 */
     div[data-testid="stVerticalBlockBorderWrapper"] div[data-baseweb="input"] {
         min-height: 40px !important;
     }
@@ -978,7 +979,7 @@ def main_app(user):
         return
 
     # 3. 商店頁
-    # [修改重點] 擴大購物車欄位的比例
+    # [修正] 給購物車更多空間 (2.0) 並使用 [2.5, 1.5, 0.5, 1.2] 的欄位比例
     col_visual, col_select, col_cart = st.columns([1.5, 1.5, 2.0], gap="medium")
     current_name = st.session_state.current_product_name
     current_product_data = df_products[df_products['Name'] == current_name]
@@ -1059,7 +1060,7 @@ def main_app(user):
 
     # [購物車欄位優化]
     def update_item_qty(item_id):
-        # 綁定給 number_input 的 callback
+        # Callback function for number input
         new_val = st.session_state[f"cart_qty_{item_id}"]
         if item_id in st.session_state.cart:
             st.session_state.cart[item_id]['qty'] = new_val
@@ -1132,12 +1133,11 @@ def main_app(user):
                         st.warning(msg, icon="⚠️")
 
                     for item in data['items']:
-                        # [修改重點] 4 欄配置，大幅增加數量欄位寬度以強制顯示 + - 按鈕
-                        # 給 Quantity 1.5 的空間，確保 + - 按鈕不會消失
-                        c_name, c_qty, c_del, c_price = st.columns([2.5, 1.5, 0.5, 1.0], vertical_alignment="center")
+                        # [關鍵修正] 使用 [2.5, 1.5, 0.5, 1.2] 的比例，確保有足夠空間顯示按鈕
+                        c_name, c_qty, c_del, c_price = st.columns([2.5, 1.5, 0.5, 1.2], vertical_alignment="center")
                         
                         with c_name:
-                            # Product Name and Spec (Color/Size)
+                            # 品名 + 規格 (顏色/尺寸)
                             st.markdown(f"<div style='line-height:1.2; font-weight:bold;'>{item['name']}</div><div style='color:#cccccc; font-size:12px; margin-top:2px;'>{item['spec']}</div>", unsafe_allow_html=True)
                         
                         with c_qty:
