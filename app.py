@@ -166,7 +166,7 @@ st.markdown(
             padding: 0px 2px !important;
             min-width: 0px !important; 
         }
-        /* [修正] 強制縮小購物車內按鈕的內距，防止重疊 */
+        /* 調整按鈕間距，避免手機版太擠 */
         div[data-testid="stVerticalBlockBorderWrapper"] button {
             padding-left: 2px !important;
             padding-right: 2px !important;
@@ -861,7 +861,6 @@ def main_app(user):
             except Exception as e:
                 st.error(f"讀取用戶資料失敗: {e}")
 
-        # [新增] 第四個 Tab: 銷售數據中心
         with tab4:
             st.subheader("📊 數據戰情室")
             st.info("💡 這裡展示即時的銷售數據分析，協助您判斷通路價值與熱銷商品。")
@@ -876,13 +875,11 @@ def main_app(user):
                     orders['Month'] = orders['Order_Date'].dt.strftime('%Y-%m')
                     orders['Total'] = pd.to_numeric(orders['Total'], errors='coerce').fillna(0)
                     
-                    # 取得產品資料以供對照 (分類 mapping)
                     df_prods = get_products_data()
                     prod_cat_map = {}
                     if not df_prods.empty and 'Name' in df_prods.columns and 'Category' in df_prods.columns:
                         prod_cat_map = dict(zip(df_prods['Name'], df_prods['Category']))
 
-                    # 解析所有訂單的 Items
                     all_items_list = []
                     for _, row in orders.iterrows():
                         try:
@@ -894,7 +891,7 @@ def main_app(user):
                                     'Month': row['Order_Date'].strftime('%Y-%m'),
                                     'Brand': item.get('brand', 'Unknown'),
                                     'Product': item.get('name', 'Unknown'),
-                                    'Category': prod_cat_map.get(item.get('name'), 'Unknown'), # 嘗試對應分類
+                                    'Category': prod_cat_map.get(item.get('name'), 'Unknown'),
                                     'Qty': int(item.get('qty', 0)),
                                     'Subtotal': int(item.get('final_subtotal', 0))
                                 })
@@ -902,7 +899,6 @@ def main_app(user):
                     
                     df_items = pd.DataFrame(all_items_list)
 
-                    # 2. KPI 指標卡
                     total_rev = int(orders['Total'].sum())
                     total_orders = len(orders)
                     avg_order_value = int(total_rev / total_orders) if total_orders > 0 else 0
@@ -914,7 +910,6 @@ def main_app(user):
                     
                     st.divider()
 
-                    # 3. 圖表分析區
                     c_chart1, c_chart2 = st.columns(2)
                     
                     with c_chart1:
@@ -937,7 +932,7 @@ def main_app(user):
                         with c_chart3:
                             st.markdown("##### 🏷️ 品牌銷售佔比 (Sales by Brand)")
                             brand_sales = df_items.groupby('Brand')['Subtotal'].sum().sort_values(ascending=False)
-                            st.bar_chart(brand_sales, horizontal=True) # 橫向長條圖更適合閱讀品牌名
+                            st.bar_chart(brand_sales, horizontal=True)
 
                         with c_chart4:
                             st.markdown("##### 📂 產品分類佔比 (Sales by Category)")
@@ -946,7 +941,6 @@ def main_app(user):
                     
                     st.divider()
                     
-                    # 4. 熱銷商品排行 (詳細表格)
                     st.markdown("##### 🔥 熱銷商品 TOP 20")
                     if not df_items.empty:
                         top_products = df_items.groupby(['Product', 'Brand', 'Category'])[['Qty', 'Subtotal']].sum().reset_index()
@@ -1047,6 +1041,13 @@ def main_app(user):
                                 st.rerun()
             if not others: st.caption("此分類下無其他商品")
 
+    # [購物車欄位優化]
+    def update_item_qty(item_id):
+        # Callback function for number input
+        new_val = st.session_state[f"cart_qty_{item_id}"]
+        if item_id in st.session_state.cart:
+            st.session_state.cart[item_id]['qty'] = new_val
+
     with col_cart:
         with st.container(border=True):
             st.markdown("<h3 style='font-size: 20px; font-weight: bold;'>🛒 購物車</h3>", unsafe_allow_html=True)
@@ -1115,30 +1116,34 @@ def main_app(user):
                         st.warning(msg, icon="⚠️")
 
                     for item in data['items']:
-                        # [修改] 採用方案 C (調整欄位比例 + CSS 優化)
-                        # 舊比例: [3, 0.6, 0.6, 0.6, 0.6, 1.5]
-                        # 新比例: [2.5, 0.5, 0.5, 0.5, 0.5, 1.2] (稍微縮小按鈕欄位，給品名空間)
-                        c_name, c_min, c_qty, c_plus, c_del, c_price = st.columns([2.5, 0.5, 0.5, 0.5, 0.5, 1.2], vertical_alignment="center")
+                        # [Modified Layout] 4 Columns: Name | Qty Input | Del | Price
+                        c_name, c_qty, c_del, c_price = st.columns([2.8, 1.2, 0.5, 1.0], vertical_alignment="center")
                         
                         with c_name:
-                            # 換行顯示規格，顏色改為 #cccccc
+                            # Product Name and Spec (Color/Size)
                             st.markdown(f"<div style='line-height:1.2; font-weight:bold;'>{item['name']}</div><div style='color:#cccccc; font-size:12px; margin-top:2px;'>{item['spec']}</div>", unsafe_allow_html=True)
-                        with c_min:
-                            if st.button("▬▬", key=f"cart_min_{item['id']}", type="secondary"):
-                                item['qty'] -= 1
-                                if item['qty'] <= 0: del st.session_state.cart[item['id']]
-                                st.rerun()
+                        
                         with c_qty:
-                            st.markdown(f"<div style='text-align:center; font-size:14px; font-weight:bold;'>{item['qty']}</div>", unsafe_allow_html=True)
-                        with c_plus:
-                            if st.button("╋", key=f"cart_plus_{item['id']}", type="secondary"):
-                                item['qty'] += 1
-                                st.rerun()
+                            # Number Input for Quantity
+                            st.number_input(
+                                "Qty",
+                                min_value=1,
+                                value=int(item['qty']),
+                                step=1,
+                                key=f"cart_qty_{item['id']}",
+                                label_visibility="collapsed",
+                                on_change=update_item_qty,
+                                args=(item['id'],)
+                            )
+                        
                         with c_del:
+                            # Delete Button
                             if st.button("✖", key=f"cart_del_{item['id']}", type="secondary", help="移除此商品"):
                                 del st.session_state.cart[item['id']]
                                 st.rerun()
+                        
                         with c_price:
+                            # Price
                             st.markdown(f"<div style='text-align:right; font-weight:bold;'>${item['final_subtotal']}</div>", unsafe_allow_html=True)
                     st.divider()
 
@@ -1189,7 +1194,7 @@ def main_app(user):
                         order_id = st.session_state.editing_order_id
                         saved_info = st.session_state.get('editing_customer_info', {})
                         c_name = saved_info.get('Customer_Name', user['Dealer_Name'])
-                        c_email = saved_info.get('Email', user['Username']) # 編輯模式沿用舊 Email
+                        c_email = saved_info.get('Email', user['Username']) # Edit mode uses old email
                         c_phone = saved_info.get('Phone', user['Phone'])
                         c_status = "賣方已修改"
                     else:
