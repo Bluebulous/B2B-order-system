@@ -971,7 +971,8 @@ def main_app(user):
         return
 
     # 3. 商店頁
-    col_visual, col_select, col_cart = st.columns([1.8, 1.8, 1.4], gap="medium")
+    # [修改重點] 擴大購物車欄位的比例
+    col_visual, col_select, col_cart = st.columns([1.5, 1.5, 2.0], gap="medium")
     current_name = st.session_state.current_product_name
     current_product_data = df_products[df_products['Name'] == current_name]
 
@@ -1051,7 +1052,7 @@ def main_app(user):
 
     # [購物車欄位優化]
     def update_item_qty(item_id):
-        # 綁定給 number_input 的 callback
+        # Callback function for number input
         new_val = st.session_state[f"cart_qty_{item_id}"]
         if item_id in st.session_state.cart:
             st.session_state.cart[item_id]['qty'] = new_val
@@ -1124,16 +1125,15 @@ def main_app(user):
                         st.warning(msg, icon="⚠️")
 
                     for item in data['items']:
-                        # [修正] 4 欄配置，使用 number_input 取代舊按鈕
-                        # 給 Quantity 1.5 的空間，確保 + - 按鈕不會消失
-                        c_name, c_qty, c_del, c_price = st.columns([2.5, 1.5, 0.5, 1.0], vertical_alignment="center")
+                        # [修正] 4 欄配置，大幅增加數量欄位寬度以強制顯示 + - 按鈕
+                        c_name, c_qty, c_del, c_price = st.columns([2.2, 1.8, 0.6, 1.1], vertical_alignment="center")
                         
                         with c_name:
-                            # 品名 + 規格 (顏色/尺寸)
+                            # Product Name and Spec (Color/Size)
                             st.markdown(f"<div style='line-height:1.2; font-weight:bold;'>{item['name']}</div><div style='color:#cccccc; font-size:12px; margin-top:2px;'>{item['spec']}</div>", unsafe_allow_html=True)
                         
                         with c_qty:
-                            # [關鍵修改] 這裡就是你要的 "白色框+深色按鈕" 原生元件
+                            # 這裡的寬度現在夠大了，按鈕應該會出現
                             st.number_input(
                                 "Qty",
                                 min_value=1,
@@ -1141,16 +1141,18 @@ def main_app(user):
                                 step=1,
                                 key=f"cart_qty_{item['id']}",
                                 label_visibility="collapsed",
-                                on_change=update_item_qty, # 綁定更新函式
+                                on_change=update_item_qty,
                                 args=(item['id'],)
                             )
                         
                         with c_del:
+                            # Delete Button
                             if st.button("✖", key=f"cart_del_{item['id']}", type="secondary", help="移除此商品"):
                                 del st.session_state.cart[item['id']]
                                 st.rerun()
                         
                         with c_price:
+                            # Price
                             st.markdown(f"<div style='text-align:right; font-weight:bold;'>${item['final_subtotal']}</div>", unsafe_allow_html=True)
                     st.divider()
 
