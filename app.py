@@ -155,14 +155,13 @@ st.markdown(
     .badge-unpaid { background-color: #c0392b; }
 
     /* === 🛒 購物車專用微調 (關鍵修正) === */
-    /* 1. 強制讓 Number Input 顯示為固定寬度 (120px)，不管欄位有多寬 */
-    /* 這樣我們就可以把欄位設很寬(確保按鈕出現)，但視覺上只有 120px */
+    /* 1. 強制讓 Number Input 顯示為固定寬度 (120px) */
     div[data-testid="stVerticalBlockBorderWrapper"] div[data-testid="stNumberInput"] {
         width: 120px !important; 
         min-width: 120px !important;
     }
     
-    /* 2. 確保輸入框內的高度與文字置中 */
+    /* 2. 確保輸入框高度適中 */
     div[data-testid="stVerticalBlockBorderWrapper"] div[data-baseweb="input"] {
         min-height: 40px !important;
     }
@@ -278,6 +277,8 @@ def update_data(worksheet, df):
                 get_products_data.clear()
             if worksheet == "BrandRules":
                 get_brand_rules.clear()
+            if worksheet == "Announcements": # [新增] 清除公告快取
+                get_announcement.clear()
             return 
         except Exception as e:
             if "429" in str(e):
@@ -288,6 +289,17 @@ def update_data(worksheet, df):
             else:
                 st.error(f"儲存失敗: {e}")
                 return
+
+# [新增] 讀取公告函式
+@st.cache_data(ttl=600)
+def get_announcement():
+    try:
+        df = conn.read(spreadsheet=SHEET_URL, worksheet="Announcements")
+        if not df.empty and 'Message' in df.columns:
+            return str(df.iloc[0]['Message'])
+        return ""
+    except:
+        return ""
 
 def convert_drive_url(url):
     if pd.isna(url) or not isinstance(url, str): 
@@ -415,6 +427,11 @@ def main_app(user):
     if 'editing_order_id' not in st.session_state: st.session_state.editing_order_id = None
     if 'editing_customer_info' not in st.session_state: st.session_state.editing_customer_info = None
     
+    # [新增] 讀取並顯示公告
+    announcement = get_announcement()
+    if announcement and announcement.strip() != "":
+        st.info(f"📢 **公告：** {announcement}", icon="📢")
+
     try:
         df_products = get_products_data()
         
@@ -637,7 +654,8 @@ def main_app(user):
             return
 
         st.title("🔧 管理員後台")
-        tab1, tab2, tab3, tab4 = st.tabs(["📦 訂單管理", "⚙️ 品牌門檻設定", "👥 用戶權限管理", "📊 銷售數據中心"])
+        # [修改] 新增第五個 Tab: 公告管理
+        tab1, tab2, tab3, tab4, tab5 = st.tabs(["📦 訂單管理", "⚙️ 品牌門檻設定", "👥 用戶權限管理", "📊 銷售數據中心", "📢 公告管理"])
         
         with tab1:
             with st.container(border=True):
@@ -976,6 +994,29 @@ def main_app(user):
             except Exception as e:
                 st.error(f"數據分析載入失敗: {e}")
 
+        # [新增] 第五個 Tab: 公告管理
+        with tab5:
+            st.subheader("📢 置頂公告設定")
+            
+            try:
+                announcement_df = get_data("Announcements")
+                # 確保有資料，若無則建立預設
+                if announcement_df.empty or 'Message' not in announcement_df.columns:
+                    announcement_df = pd.DataFrame([{"Message": "歡迎使用 Bluebulous B2B 採購系統！"}])
+                
+                current_msg = announcement_df.iloc[0]['Message'] if not announcement_df.empty else ""
+                
+                new_msg = st.text_area("公告內容 (支援 Emoji)", value=current_msg, height=100)
+                
+                if st.button("💾 更新公告", type="primary"):
+                    announcement_df = pd.DataFrame([{"Message": new_msg}])
+                    update_data("Announcements", announcement_df)
+                    st.success("公告已更新！請重新整理頁面查看效果。")
+                    get_announcement.clear() # 清除快取
+                    
+            except Exception as e:
+                st.error(f"讀取公告失敗: {e}")
+
         return
 
     # 3. 商店頁
@@ -1137,7 +1178,7 @@ def main_app(user):
                         c_name, c_qty, c_del, c_price = st.columns([2.5, 1.5, 0.5, 1.2], vertical_alignment="center")
                         
                         with c_name:
-                            # 品名 + 規格 (顏色/尺寸)
+                            # Product Name and Spec (Color/Size)
                             st.markdown(f"<div style='line-height:1.2; font-weight:bold;'>{item['name']}</div><div style='color:#cccccc; font-size:12px; margin-top:2px;'>{item['spec']}</div>", unsafe_allow_html=True)
                         
                         with c_qty:
