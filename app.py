@@ -166,10 +166,11 @@ st.markdown(
             padding: 0px 2px !important;
             min-width: 0px !important; 
         }
-        div.stButton > button {
-            min-height: 45px !important;
-            padding-left: 5px !important;
-            padding-right: 5px !important;
+        /* [修正] 強制縮小購物車內按鈕的內距，防止重疊 */
+        div[data-testid="stVerticalBlockBorderWrapper"] button {
+            padding-left: 2px !important;
+            padding-right: 2px !important;
+            min-height: 35px !important;
         }
         p, .stMarkdown, div[data-testid="stText"] {
             font-size: 14px !important;
@@ -306,7 +307,6 @@ def display_status_badges(status_str):
 def send_order_email(order_data, cart_items, is_update=False):
     SMTP_SERVER = "smtp.gmail.com"
     SMTP_PORT = 587
-    # 請務必確認這裡的 Email 拼字是正確的
     SENDER_EMAIL = "bluebulous.official@gmail.com"
     SENDER_PASSWORD = "mjzm yfwj nbxz nefj"
 
@@ -503,7 +503,6 @@ def main_app(user):
                 if 'Tracking_Number' not in orders.columns: orders['Tracking_Number'] = ""
                 if 'Admin_Note' not in orders.columns: orders['Admin_Note'] = ""
                 if 'Extra_Discount' not in orders.columns: orders['Extra_Discount'] = 0 
-                # [修正] 這裡加入 to_numeric 強制轉換，防止 '0.0' 字串錯誤
                 orders['Extra_Discount'] = pd.to_numeric(orders['Extra_Discount'], errors='coerce').fillna(0).astype(int)
 
                 my_orders = orders[orders['Email'] == user['Username']].sort_values("Order_Time", ascending=False)
@@ -622,7 +621,6 @@ def main_app(user):
             return
 
         st.title("🔧 管理員後台")
-        # [修改] 新增第四個 Tab: 銷售數據分析
         tab1, tab2, tab3, tab4 = st.tabs(["📦 訂單管理", "⚙️ 品牌門檻設定", "👥 用戶權限管理", "📊 銷售數據中心"])
         
         with tab1:
@@ -632,9 +630,7 @@ def main_app(user):
                     if 'Tracking_Number' not in orders.columns: orders['Tracking_Number'] = ""
                     if 'Admin_Note' not in orders.columns: orders['Admin_Note'] = ""
                     if 'Extra_Discount' not in orders.columns: orders['Extra_Discount'] = 0
-                    
-                    # [修正] 這裡也加入 to_numeric 強制轉換，防止 0.0 錯誤
-                    orders['Extra_Discount'] = pd.to_numeric(orders['Extra_Discount'], errors='coerce').fillna(0).astype(int)
+                    orders['Extra_Discount'] = orders['Extra_Discount'].fillna(0).astype(int)
 
                     if not orders.empty:
                         all_orders = orders.sort_values("Order_Time", ascending=False)
@@ -1119,10 +1115,14 @@ def main_app(user):
                         st.warning(msg, icon="⚠️")
 
                     for item in data['items']:
-                        c_name, c_min, c_qty, c_plus, c_del, c_price = st.columns([3, 0.6, 0.6, 0.6, 0.6, 1.5], vertical_alignment="center")
+                        # [修改] 採用方案 C (調整欄位比例 + CSS 優化)
+                        # 舊比例: [3, 0.6, 0.6, 0.6, 0.6, 1.5]
+                        # 新比例: [2.5, 0.5, 0.5, 0.5, 0.5, 1.2] (稍微縮小按鈕欄位，給品名空間)
+                        c_name, c_min, c_qty, c_plus, c_del, c_price = st.columns([2.5, 0.5, 0.5, 0.5, 0.5, 1.2], vertical_alignment="center")
                         
                         with c_name:
-                            st.markdown(f"{item['name']} <span style='color:#888; font-size:12px;'>({item['spec']})</span>", unsafe_allow_html=True)
+                            # 換行顯示規格，顏色改為 #cccccc
+                            st.markdown(f"<div style='line-height:1.2; font-weight:bold;'>{item['name']}</div><div style='color:#cccccc; font-size:12px; margin-top:2px;'>{item['spec']}</div>", unsafe_allow_html=True)
                         with c_min:
                             if st.button("▬▬", key=f"cart_min_{item['id']}", type="secondary"):
                                 item['qty'] -= 1
@@ -1170,7 +1170,7 @@ def main_app(user):
                     client_name = st.session_state.get('editing_customer_info', {}).get('Customer_Name', 'Unknown')
                     st.warning(f"🔧 正在修改客戶 [{client_name}] 的訂單：{st.session_state.editing_order_id}")
                 else: 
-                    # Email input before checkout
+                    # 結帳前 Email 輸入框
                     st.markdown("---")
                     
                     default_checkout_email = str(user.get('Contact_Email', '')).replace('nan', '')
@@ -1181,7 +1181,7 @@ def main_app(user):
                     
                     btn_text = "CHECKOUT / 送出訂單"
 
-                # Button enable logic
+                # 按鈕啟用邏輯
                 disable_btn = (not is_editing) and (not contact_email_input)
                 
                 if st.button(btn_text, type="primary", use_container_width=True, disabled=disable_btn):
@@ -1189,7 +1189,7 @@ def main_app(user):
                         order_id = st.session_state.editing_order_id
                         saved_info = st.session_state.get('editing_customer_info', {})
                         c_name = saved_info.get('Customer_Name', user['Dealer_Name'])
-                        c_email = saved_info.get('Email', user['Username']) # Edit mode uses old email
+                        c_email = saved_info.get('Email', user['Username']) # 編輯模式沿用舊 Email
                         c_phone = saved_info.get('Phone', user['Phone'])
                         c_status = "賣方已修改"
                     else:
@@ -1199,7 +1199,7 @@ def main_app(user):
                         c_phone = user['Phone']
                         c_status = "待處理"
                         
-                        # Automatically update user email
+                        # 自動更新使用者 Email
                         try:
                             if c_email != str(user.get('Contact_Email', '')):
                                 users_d = get_data("Users")
