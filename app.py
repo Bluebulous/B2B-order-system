@@ -1126,7 +1126,8 @@ def main_app(user):
 
                     for item in data['items']:
                         # [修正] 4 欄配置，大幅增加數量欄位寬度以強制顯示 + - 按鈕
-                        c_name, c_qty, c_del, c_price = st.columns([2.2, 1.8, 0.6, 1.1], vertical_alignment="center")
+                        # 給 Quantity 1.0 的空間，確保 + - 按鈕不會消失
+                        c_name, c_qty, c_del, c_price = st.columns([3.2, 1.0, 0.5, 1.0], vertical_alignment="center")
                         
                         with c_name:
                             # Product Name and Spec (Color/Size)
