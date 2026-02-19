@@ -155,10 +155,10 @@ st.markdown(
     .badge-unpaid { background-color: #c0392b; }
 
     /* === 🛒 購物車專用微調 (關鍵修正) === */
-    /* 1. 強制讓 Number Input 顯示為固定寬度 (120px) */
-    div[data-testid="stVerticalBlockBorderWrapper"] div[data-testid="stNumberInput"] {
-        width: 120px !important; 
-        min-width: 120px !important;
+    /* 1. 強制讓 Number Input 顯示為固定寬度 (110px)，解決過長問題 */
+    div[data-testid="stVerticalBlockBorderWrapper"] div[data-testid="stNumberInput"] > div {
+        width: 110px !important; 
+        flex: none !important; /* 禁止自動填滿整個欄位 */
     }
     
     /* 2. 確保輸入框高度適中 */
@@ -277,8 +277,10 @@ def update_data(worksheet, df):
                 get_products_data.clear()
             if worksheet == "BrandRules":
                 get_brand_rules.clear()
-            if worksheet == "Announcements": # [新增] 清除公告快取
+            if worksheet == "Announcements":
                 get_announcement.clear()
+            if worksheet == "SystemLogs": # 清除日誌快取
+                get_data.clear()
             return 
         except Exception as e:
             if "429" in str(e):
@@ -290,7 +292,29 @@ def update_data(worksheet, df):
                 st.error(f"儲存失敗: {e}")
                 return
 
-# [新增] 讀取公告函式
+# [新增] 寫入系統日誌 (Log)
+def log_system_event(user_data, action, details=""):
+    try:
+        # 1. 讀取現有 Logs
+        logs_df = conn.read(spreadsheet=SHEET_URL, worksheet="SystemLogs")
+        
+        # 2. 建立新 Log
+        new_log = {
+            "Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "Username": user_data['Username'],
+            "Dealer": user_data['Dealer_Name'],
+            "Action": action,
+            "Details": details
+        }
+        
+        # 3. 合併並寫入
+        updated_logs = pd.concat([logs_df, pd.DataFrame([new_log])], ignore_index=True)
+        conn.update(spreadsheet=SHEET_URL, worksheet="SystemLogs", data=updated_logs)
+        
+    except Exception as e:
+        print(f"Log Error (Ignored): {e}") # 失敗不報錯，避免影響主流程
+
+# 讀取公告函式
 @st.cache_data(ttl=600)
 def get_announcement():
     try:
@@ -427,7 +451,10 @@ def main_app(user):
     if 'editing_order_id' not in st.session_state: st.session_state.editing_order_id = None
     if 'editing_customer_info' not in st.session_state: st.session_state.editing_customer_info = None
     
-    # [新增] 讀取並顯示公告
+    # [狀態] 追蹤是否已記錄過「開始購物」
+    if 'has_logged_cart_start' not in st.session_state: st.session_state.has_logged_cart_start = False
+
+    # 讀取並顯示公告
     announcement = get_announcement()
     if announcement and announcement.strip() != "":
         st.info(f"📢 **公告：** {announcement}", icon="📢")
@@ -654,8 +681,8 @@ def main_app(user):
             return
 
         st.title("🔧 管理員後台")
-        # [修改] 新增第五個 Tab: 公告管理
-        tab1, tab2, tab3, tab4, tab5 = st.tabs(["📦 訂單管理", "⚙️ 品牌門檻設定", "👥 用戶權限管理", "📊 銷售數據中心", "📢 公告管理"])
+        # [修改] 新增第六個 Tab: 足跡追蹤
+        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📦 訂單管理", "⚙️ 品牌門檻設定", "👥 用戶權限管理", "📊 銷售數據中心", "📢 公告管理", "🕵️‍♂️ 足跡追蹤"])
         
         with tab1:
             with st.container(border=True):
@@ -994,13 +1021,11 @@ def main_app(user):
             except Exception as e:
                 st.error(f"數據分析載入失敗: {e}")
 
-        # [新增] 第五個 Tab: 公告管理
+        # 第五個 Tab: 公告管理
         with tab5:
             st.subheader("📢 置頂公告設定")
-            
             try:
                 announcement_df = get_data("Announcements")
-                # 確保有資料，若無則建立預設
                 if announcement_df.empty or 'Message' not in announcement_df.columns:
                     announcement_df = pd.DataFrame([{"Message": "歡迎使用 Bluebulous B2B 採購系統！"}])
                 
@@ -1013,9 +1038,43 @@ def main_app(user):
                     update_data("Announcements", announcement_df)
                     st.success("公告已更新！請重新整理頁面查看效果。")
                     get_announcement.clear() # 清除快取
-                    
             except Exception as e:
                 st.error(f"讀取公告失敗: {e}")
+
+        # [新增] 第六個 Tab: 足跡追蹤
+        with tab6:
+            st.subheader("🕵️‍♂️ 系統日誌 (足跡追蹤)")
+            st.info("這裡記錄了經銷商的登入與操作行為，協助您發現「棄單」狀況。\n(註：若有登入紀錄、有開始購物，但沒有結帳紀錄，即為潛在棄單)")
+            
+            if st.button("🔄 刷新日誌"):
+                st.rerun()
+
+            try:
+                logs = get_data("SystemLogs")
+                if logs.empty:
+                    st.warning("目前尚無日誌紀錄")
+                else:
+                    # 排序：最新的在上面
+                    logs = logs.sort_values("Time", ascending=False)
+                    
+                    # 簡易篩選器
+                    filter_user = st.multiselect("篩選經銷商", logs['Dealer'].unique())
+                    if filter_user:
+                        logs = logs[logs['Dealer'].isin(filter_user)]
+
+                    st.dataframe(
+                        logs, 
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            "Time": st.column_config.TextColumn("時間"),
+                            "Dealer": st.column_config.TextColumn("經銷商"),
+                            "Action": st.column_config.TextColumn("動作", width="medium"),
+                            "Details": st.column_config.TextColumn("詳細資訊", width="large"),
+                        }
+                    )
+            except Exception as e:
+                st.error(f"讀取日誌失敗: {e}")
 
         return
 
@@ -1054,6 +1113,11 @@ def main_app(user):
                     }
                 st.toast(f"已加入 {p_name} x {qty}", icon="🛒")
                 st.session_state[q_key] = 1
+                
+                # [新增] 記錄開始購物行為 (每此登入只記一次)
+                if not st.session_state.has_logged_cart_start:
+                    log_system_event(st.session_state['user'], "Start Shopping", f"Added first item: {p_name}")
+                    st.session_state.has_logged_cart_start = True
 
             for i, (_, sku) in enumerate(variants.iterrows()):
                 c_row = st.container()
@@ -1174,8 +1238,9 @@ def main_app(user):
                         st.warning(msg, icon="⚠️")
 
                     for item in data['items']:
-                        # [關鍵修正] 使用 [2.5, 1.5, 0.5, 1.2] 的比例，確保有足夠空間顯示按鈕
-                        c_name, c_qty, c_del, c_price = st.columns([2.5, 1.5, 0.5, 1.2], vertical_alignment="center")
+                        # [修正] 4 欄配置，大幅增加數量欄位寬度以強制顯示 + - 按鈕
+                        # 給 Quantity 1.0 的空間，確保 + - 按鈕不會消失
+                        c_name, c_qty, c_del, c_price = st.columns([3.2, 1.0, 0.5, 1.0], vertical_alignment="center")
                         
                         with c_name:
                             # Product Name and Spec (Color/Size)
@@ -1293,6 +1358,8 @@ def main_app(user):
                                 idx = target_idx[0]
                                 for key, value in order_data.items():
                                     old_orders.at[idx, key] = value
+                                    # [新增] 若結帳，記錄 Log
+                                    log_system_event(user, "Checkout", f"Order ID: {order_id}")
                                 update_data("Orders", old_orders)
                                 st.success(f"訂單 {order_id} 修改完成！")
                                 with st.spinner("正在寄送通知信給客戶..."):
@@ -1303,6 +1370,8 @@ def main_app(user):
                         else:
                             updated = pd.concat([old_orders, pd.DataFrame([order_data])], ignore_index=True)
                             update_data("Orders", updated)
+                            # [新增] 記錄 Log
+                            log_system_event(user, "Checkout", f"Order ID: {order_id}")
                             st.success(f"訂單 {order_id} 已送出!")
                             with st.spinner("正在寄送確認信..."):
                                 if send_order_email(order_data, final_cart_data):
@@ -1312,6 +1381,7 @@ def main_app(user):
                         st.session_state.cart = {}
                         st.session_state.editing_order_id = None
                         st.session_state.editing_customer_info = None
+                        st.session_state.has_logged_cart_start = False # 重置購物車追蹤
                         time.sleep(1)
                         if user['Username'] in ADMIN_USERS: st.session_state.page = 'admin_orders'
                         else: st.session_state.page = 'shop'
@@ -1333,6 +1403,8 @@ def login_page():
                 match = users[users['Username'] == u]
                 if not match.empty and str(match.iloc[0]['Password']) == p:
                     st.session_state['user'] = match.iloc[0]
+                    # [新增] 記錄登入 Log
+                    log_system_event(match.iloc[0], "Login", "User logged in")
                     st.rerun()
                 else: st.error("帳號或密碼錯誤")
 
