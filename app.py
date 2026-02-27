@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import altair as alt  # [新增] 使用 Streamlit 內建的 Altair 畫圓餅圖
 from streamlit_gsheets import GSheetsConnection
 from datetime import datetime
 import json
@@ -154,11 +155,11 @@ st.markdown(
     .badge-done { background-color: #2c3e50; }
     .badge-unpaid { background-color: #c0392b; }
 
-    /* === 🛒 購物車專用微調 (關鍵修正) === */
-    /* 1. 強制讓 Number Input 顯示為固定寬度 (110px)，解決過長問題 */
-    div[data-testid="stVerticalBlockBorderWrapper"] div[data-testid="stNumberInput"] > div {
-        width: 110px !important; 
-        flex: none !important; /* 禁止自動填滿整個欄位 */
+    /* === 🛒 購物車專用微調 === */
+    /* 1. 強制讓 Number Input 顯示為固定寬度 (120px) */
+    div[data-testid="stVerticalBlockBorderWrapper"] div[data-testid="stNumberInput"] {
+        width: 120px !important; 
+        min-width: 120px !important;
     }
     
     /* 2. 確保輸入框高度適中 */
@@ -279,7 +280,7 @@ def update_data(worksheet, df):
                 get_brand_rules.clear()
             if worksheet == "Announcements":
                 get_announcement.clear()
-            if worksheet == "SystemLogs": # 清除日誌快取
+            if worksheet == "SystemLogs": 
                 get_data.clear()
             return 
         except Exception as e:
@@ -292,13 +293,10 @@ def update_data(worksheet, df):
                 st.error(f"儲存失敗: {e}")
                 return
 
-# [新增] 寫入系統日誌 (Log)
+# 寫入系統日誌 (Log)
 def log_system_event(user_data, action, details=""):
     try:
-        # 1. 讀取現有 Logs
         logs_df = conn.read(spreadsheet=SHEET_URL, worksheet="SystemLogs")
-        
-        # 2. 建立新 Log
         new_log = {
             "Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "Username": user_data['Username'],
@@ -306,13 +304,10 @@ def log_system_event(user_data, action, details=""):
             "Action": action,
             "Details": details
         }
-        
-        # 3. 合併並寫入
         updated_logs = pd.concat([logs_df, pd.DataFrame([new_log])], ignore_index=True)
         conn.update(spreadsheet=SHEET_URL, worksheet="SystemLogs", data=updated_logs)
-        
     except Exception as e:
-        print(f"Log Error (Ignored): {e}") # 失敗不報錯，避免影響主流程
+        print(f"Log Error (Ignored): {e}")
 
 # 讀取公告函式
 @st.cache_data(ttl=600)
@@ -451,7 +446,6 @@ def main_app(user):
     if 'editing_order_id' not in st.session_state: st.session_state.editing_order_id = None
     if 'editing_customer_info' not in st.session_state: st.session_state.editing_customer_info = None
     
-    # [狀態] 追蹤是否已記錄過「開始購物」
     if 'has_logged_cart_start' not in st.session_state: st.session_state.has_logged_cart_start = False
 
     # 讀取並顯示公告
@@ -681,7 +675,6 @@ def main_app(user):
             return
 
         st.title("🔧 管理員後台")
-        # [修改] 新增第六個 Tab: 足跡追蹤
         tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📦 訂單管理", "⚙️ 品牌門檻設定", "👥 用戶權限管理", "📊 銷售數據中心", "📢 公告管理", "🕵️‍♂️ 足跡追蹤"])
         
         with tab1:
@@ -992,13 +985,25 @@ def main_app(user):
                     if not df_items.empty:
                         with c_chart3:
                             st.markdown("##### 🏷️ 品牌銷售佔比 (Sales by Brand)")
-                            brand_sales = df_items.groupby('Brand')['Subtotal'].sum().sort_values(ascending=False)
-                            st.bar_chart(brand_sales, horizontal=True)
+                            brand_sales_df = df_items.groupby('Brand')['Subtotal'].sum().reset_index()
+                            # [修改] 改用 Altair 圓餅圖
+                            chart_brand = alt.Chart(brand_sales_df).mark_arc(innerRadius=0).encode(
+                                theta=alt.Theta(field="Subtotal", type="quantitative"),
+                                color=alt.Color(field="Brand", type="nominal", legend=alt.Legend(title="品牌", orient="bottom")),
+                                tooltip=[alt.Tooltip("Brand", title="品牌"), alt.Tooltip("Subtotal", title="銷售總額")]
+                            ).properties(height=350)
+                            st.altair_chart(chart_brand, use_container_width=True)
 
                         with c_chart4:
                             st.markdown("##### 📂 產品分類佔比 (Sales by Category)")
-                            cat_sales = df_items.groupby('Category')['Subtotal'].sum().sort_values(ascending=False)
-                            st.bar_chart(cat_sales, color="#2ecc71")
+                            cat_sales_df = df_items.groupby('Category')['Subtotal'].sum().reset_index()
+                            # [修改] 甜甜圈圖 (設定 innerRadius=60 產生挖空效果)
+                            chart_cat = alt.Chart(cat_sales_df).mark_arc(innerRadius=60).encode(
+                                theta=alt.Theta(field="Subtotal", type="quantitative"),
+                                color=alt.Color(field="Category", type="nominal", legend=alt.Legend(title="分類", orient="bottom")),
+                                tooltip=[alt.Tooltip("Category", title="分類"), alt.Tooltip("Subtotal", title="銷售總額")]
+                            ).properties(height=350)
+                            st.altair_chart(chart_cat, use_container_width=True)
                     
                     st.divider()
                     
@@ -1041,7 +1046,7 @@ def main_app(user):
             except Exception as e:
                 st.error(f"讀取公告失敗: {e}")
 
-        # [新增] 第六個 Tab: 足跡追蹤
+        # 第六個 Tab: 足跡追蹤
         with tab6:
             st.subheader("🕵️‍♂️ 系統日誌 (足跡追蹤)")
             st.info("這裡記錄了經銷商的登入與操作行為，協助您發現「棄單」狀況。\n(註：若有登入紀錄、有開始購物，但沒有結帳紀錄，即為潛在棄單)")
@@ -1079,7 +1084,6 @@ def main_app(user):
         return
 
     # 3. 商店頁
-    # [修正] 給購物車更多空間 (2.0) 並使用 [2.5, 1.5, 0.5, 1.2] 的欄位比例
     col_visual, col_select, col_cart = st.columns([1.5, 1.5, 2.0], gap="medium")
     current_name = st.session_state.current_product_name
     current_product_data = df_products[df_products['Name'] == current_name]
@@ -1114,7 +1118,7 @@ def main_app(user):
                 st.toast(f"已加入 {p_name} x {qty}", icon="🛒")
                 st.session_state[q_key] = 1
                 
-                # [新增] 記錄開始購物行為 (每此登入只記一次)
+                # 記錄開始購物行為
                 if not st.session_state.has_logged_cart_start:
                     log_system_event(st.session_state['user'], "Start Shopping", f"Added first item: {p_name}")
                     st.session_state.has_logged_cart_start = True
@@ -1163,9 +1167,8 @@ def main_app(user):
                                 st.rerun()
             if not others: st.caption("此分類下無其他商品")
 
-    # [購物車欄位優化]
+    # 購物車邏輯
     def update_item_qty(item_id):
-        # Callback function for number input
         new_val = st.session_state[f"cart_qty_{item_id}"]
         if item_id in st.session_state.cart:
             st.session_state.cart[item_id]['qty'] = new_val
@@ -1238,16 +1241,12 @@ def main_app(user):
                         st.warning(msg, icon="⚠️")
 
                     for item in data['items']:
-                        # [修正] 4 欄配置，大幅增加數量欄位寬度以強制顯示 + - 按鈕
-                        # 給 Quantity 1.0 的空間，確保 + - 按鈕不會消失
-                        c_name, c_qty, c_del, c_price = st.columns([3.2, 1.0, 0.5, 1.0], vertical_alignment="center")
+                        c_name, c_qty, c_del, c_price = st.columns([2.5, 1.5, 0.5, 1.2], vertical_alignment="center")
                         
                         with c_name:
-                            # Product Name and Spec (Color/Size)
                             st.markdown(f"<div style='line-height:1.2; font-weight:bold;'>{item['name']}</div><div style='color:#cccccc; font-size:12px; margin-top:2px;'>{item['spec']}</div>", unsafe_allow_html=True)
                         
                         with c_qty:
-                            # 這裡的寬度現在夠大了，按鈕應該會出現
                             st.number_input(
                                 "Qty",
                                 min_value=1,
@@ -1260,13 +1259,11 @@ def main_app(user):
                             )
                         
                         with c_del:
-                            # Delete Button
                             if st.button("✖", key=f"cart_del_{item['id']}", type="secondary", help="移除此商品"):
                                 del st.session_state.cart[item['id']]
                                 st.rerun()
                         
                         with c_price:
-                            # Price
                             st.markdown(f"<div style='text-align:right; font-weight:bold;'>${item['final_subtotal']}</div>", unsafe_allow_html=True)
                     st.divider()
 
@@ -1298,18 +1295,14 @@ def main_app(user):
                     client_name = st.session_state.get('editing_customer_info', {}).get('Customer_Name', 'Unknown')
                     st.warning(f"🔧 正在修改客戶 [{client_name}] 的訂單：{st.session_state.editing_order_id}")
                 else: 
-                    # 結帳前 Email 輸入框
                     st.markdown("---")
-                    
                     default_checkout_email = str(user.get('Contact_Email', '')).replace('nan', '')
                     if not default_checkout_email and "@" in str(user['Username']):
                         default_checkout_email = user['Username']
                     
                     contact_email_input = st.text_input("📧 接收訂單通知 Email (必填)", value=default_checkout_email, help="訂單確認信將寄送至此信箱")
-                    
                     btn_text = "CHECKOUT / 送出訂單"
 
-                # 按鈕啟用邏輯
                 disable_btn = (not is_editing) and (not contact_email_input)
                 
                 if st.button(btn_text, type="primary", use_container_width=True, disabled=disable_btn):
@@ -1317,17 +1310,16 @@ def main_app(user):
                         order_id = st.session_state.editing_order_id
                         saved_info = st.session_state.get('editing_customer_info', {})
                         c_name = saved_info.get('Customer_Name', user['Dealer_Name'])
-                        c_email = saved_info.get('Email', user['Username']) # Edit mode uses old email
+                        c_email = saved_info.get('Email', user['Username']) 
                         c_phone = saved_info.get('Phone', user['Phone'])
                         c_status = "賣方已修改"
                     else:
                         order_id = f"ORD-{datetime.now().strftime('%Y%m%d%H%M%S')}"
                         c_name = user['Dealer_Name']
-                        c_email = contact_email_input # Use input email
+                        c_email = contact_email_input 
                         c_phone = user['Phone']
                         c_status = "待處理"
                         
-                        # 自動更新使用者 Email
                         try:
                             if c_email != str(user.get('Contact_Email', '')):
                                 users_d = get_data("Users")
@@ -1358,7 +1350,6 @@ def main_app(user):
                                 idx = target_idx[0]
                                 for key, value in order_data.items():
                                     old_orders.at[idx, key] = value
-                                    # [新增] 若結帳，記錄 Log
                                     log_system_event(user, "Checkout", f"Order ID: {order_id}")
                                 update_data("Orders", old_orders)
                                 st.success(f"訂單 {order_id} 修改完成！")
@@ -1370,7 +1361,6 @@ def main_app(user):
                         else:
                             updated = pd.concat([old_orders, pd.DataFrame([order_data])], ignore_index=True)
                             update_data("Orders", updated)
-                            # [新增] 記錄 Log
                             log_system_event(user, "Checkout", f"Order ID: {order_id}")
                             st.success(f"訂單 {order_id} 已送出!")
                             with st.spinner("正在寄送確認信..."):
@@ -1381,7 +1371,7 @@ def main_app(user):
                         st.session_state.cart = {}
                         st.session_state.editing_order_id = None
                         st.session_state.editing_customer_info = None
-                        st.session_state.has_logged_cart_start = False # 重置購物車追蹤
+                        st.session_state.has_logged_cart_start = False 
                         time.sleep(1)
                         if user['Username'] in ADMIN_USERS: st.session_state.page = 'admin_orders'
                         else: st.session_state.page = 'shop'
@@ -1403,7 +1393,6 @@ def login_page():
                 match = users[users['Username'] == u]
                 if not match.empty and str(match.iloc[0]['Password']) == p:
                     st.session_state['user'] = match.iloc[0]
-                    # [新增] 記錄登入 Log
                     log_system_event(match.iloc[0], "Login", "User logged in")
                     st.rerun()
                 else: st.error("帳號或密碼錯誤")
