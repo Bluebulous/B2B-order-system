@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-import altair as alt  # [新增] 使用 Streamlit 內建的 Altair 畫圓餅圖
+import altair as alt
 from streamlit_gsheets import GSheetsConnection
 from datetime import datetime
 import json
@@ -448,7 +448,6 @@ def main_app(user):
     
     if 'has_logged_cart_start' not in st.session_state: st.session_state.has_logged_cart_start = False
 
-    # 讀取並顯示公告
     announcement = get_announcement()
     if announcement and announcement.strip() != "":
         st.info(f"📢 **公告：** {announcement}", icon="📢")
@@ -939,13 +938,15 @@ def main_app(user):
                         try:
                             items = json.loads(row['Items_Json'])
                             for item in items.values():
+                                # [防呆機制] 優先抓取 JSON 內的 Category，若無則用最新商品表比對
+                                c_cat = item.get('category', prod_cat_map.get(item.get('name'), 'Unknown'))
                                 all_items_list.append({
                                     'Order_ID': row['Order_ID'],
                                     'Dealer': row['Customer_Name'],
                                     'Month': row['Order_Date'].strftime('%Y-%m'),
                                     'Brand': item.get('brand', 'Unknown'),
                                     'Product': item.get('name', 'Unknown'),
-                                    'Category': prod_cat_map.get(item.get('name'), 'Unknown'),
+                                    'Category': c_cat,
                                     'Qty': int(item.get('qty', 0)),
                                     'Subtotal': int(item.get('final_subtotal', 0))
                                 })
@@ -986,23 +987,41 @@ def main_app(user):
                         with c_chart3:
                             st.markdown("##### 🏷️ 品牌銷售佔比 (Sales by Brand)")
                             brand_sales_df = df_items.groupby('Brand')['Subtotal'].sum().reset_index()
-                            # [修改] 改用 Altair 圓餅圖
-                            chart_brand = alt.Chart(brand_sales_df).mark_arc(innerRadius=0).encode(
-                                theta=alt.Theta(field="Subtotal", type="quantitative"),
+                            
+                            total_brand = brand_sales_df['Subtotal'].sum()
+                            brand_sales_df['Percentage_Num'] = (brand_sales_df['Subtotal'] / total_brand) * 100
+                            brand_sales_df['Percentage'] = brand_sales_df['Percentage_Num'].round(1).astype(str) + '%'
+                            brand_sales_df['Label'] = brand_sales_df.apply(lambda x: f"{x['Brand']} {x['Percentage']}" if x['Percentage_Num'] > 3 else "", axis=1)
+
+                            base_brand = alt.Chart(brand_sales_df).encode(
+                                theta=alt.Theta(field="Subtotal", type="quantitative", stack=True),
                                 color=alt.Color(field="Brand", type="nominal", legend=alt.Legend(title="品牌", orient="bottom")),
-                                tooltip=[alt.Tooltip("Brand", title="品牌"), alt.Tooltip("Subtotal", title="銷售總額")]
-                            ).properties(height=350)
+                                tooltip=[alt.Tooltip("Brand", title="品牌"), alt.Tooltip("Subtotal", title="銷售總額"), alt.Tooltip("Percentage", title="佔比")]
+                            )
+                            pie_brand = base_brand.mark_arc(innerRadius=0)
+                            text_brand = base_brand.mark_text(size=12, fill="white", fontWeight="bold").encode(text="Label:N")
+                            
+                            chart_brand = (pie_brand + text_brand).properties(height=350)
                             st.altair_chart(chart_brand, use_container_width=True)
 
                         with c_chart4:
                             st.markdown("##### 📂 產品分類佔比 (Sales by Category)")
                             cat_sales_df = df_items.groupby('Category')['Subtotal'].sum().reset_index()
-                            # [修改] 甜甜圈圖 (設定 innerRadius=60 產生挖空效果)
-                            chart_cat = alt.Chart(cat_sales_df).mark_arc(innerRadius=60).encode(
-                                theta=alt.Theta(field="Subtotal", type="quantitative"),
+                            
+                            total_cat = cat_sales_df['Subtotal'].sum()
+                            cat_sales_df['Percentage_Num'] = (cat_sales_df['Subtotal'] / total_cat) * 100
+                            cat_sales_df['Percentage'] = cat_sales_df['Percentage_Num'].round(1).astype(str) + '%'
+                            cat_sales_df['Label'] = cat_sales_df.apply(lambda x: f"{x['Category']} {x['Percentage']}" if x['Percentage_Num'] > 3 else "", axis=1)
+
+                            base_cat = alt.Chart(cat_sales_df).encode(
+                                theta=alt.Theta(field="Subtotal", type="quantitative", stack=True),
                                 color=alt.Color(field="Category", type="nominal", legend=alt.Legend(title="分類", orient="bottom")),
-                                tooltip=[alt.Tooltip("Category", title="分類"), alt.Tooltip("Subtotal", title="銷售總額")]
-                            ).properties(height=350)
+                                tooltip=[alt.Tooltip("Category", title="分類"), alt.Tooltip("Subtotal", title="銷售總額"), alt.Tooltip("Percentage", title="佔比")]
+                            )
+                            pie_cat = base_cat.mark_arc(innerRadius=60)
+                            text_cat = base_cat.mark_text(size=12, fill="white", fontWeight="bold").encode(text="Label:N")
+                            
+                            chart_cat = (pie_cat + text_cat).properties(height=350)
                             st.altair_chart(chart_cat, use_container_width=True)
                     
                     st.divider()
@@ -1104,7 +1123,8 @@ def main_app(user):
             h4.markdown("**零售價**\n(含稅)")
             h5.markdown("") 
 
-            def add_to_cart_callback(p_id, p_name, p_spec, p_w, p_r, q_key, p_brand):
+            # [修改] add_to_cart_callback 新增 p_category 參數
+            def add_to_cart_callback(p_id, p_name, p_spec, p_w, p_r, q_key, p_brand, p_category):
                 qty = st.session_state[q_key]
                 if qty <= 0: return
                 if p_id in st.session_state.cart:
@@ -1113,12 +1133,11 @@ def main_app(user):
                     st.session_state.cart[p_id] = {
                         "id": p_id, "name": p_name, "spec": p_spec,
                         "wholesale_price": int(p_w), "retail_price": int(p_r),
-                        "brand": p_brand, "qty": qty
+                        "brand": p_brand, "category": p_category, "qty": qty # [新增] 寫入 Category
                     }
                 st.toast(f"已加入 {p_name} x {qty}", icon="🛒")
                 st.session_state[q_key] = 1
                 
-                # 記錄開始購物行為
                 if not st.session_state.has_logged_cart_start:
                     log_system_event(st.session_state['user'], "Start Shopping", f"Added first item: {p_name}")
                     st.session_state.has_logged_cart_start = True
@@ -1133,9 +1152,10 @@ def main_app(user):
                 with c3: st.markdown(f"<div style='color:#ff5500; font-weight:bold;'>${int(sku['Wholesale_Price'])}</div>", unsafe_allow_html=True)
                 with c4: st.markdown(f"<div style='color:#666;'>${int(sku['Retail_Price'])}</div>", unsafe_allow_html=True)
                 with c5:
+                    # [修改] 傳入 Category 參數
                     st.button("ADD", key=f"add_{sku['Product_ID']}_{selected_color}_{i}", type="primary", use_container_width=True,
                         on_click=add_to_cart_callback,
-                        args=(sku['Product_ID'], current_name, f"{selected_color} / {str(sku['Size'])}", sku['Wholesale_Price'], sku['Retail_Price'], qty_key, current_product_data.iloc[0]['Brand']))
+                        args=(sku['Product_ID'], current_name, f"{selected_color} / {str(sku['Size'])}", sku['Wholesale_Price'], sku['Retail_Price'], qty_key, current_product_data.iloc[0]['Brand'], current_product_data.iloc[0]['Category']))
 
     with col_visual:
         with st.container(border=True):
