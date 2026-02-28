@@ -938,7 +938,6 @@ def main_app(user):
                         try:
                             items = json.loads(row['Items_Json'])
                             for item in items.values():
-                                # [防呆機制] 優先抓取 JSON 內的 Category，若無則用最新商品表比對
                                 c_cat = item.get('category', prod_cat_map.get(item.get('name'), 'Unknown'))
                                 all_items_list.append({
                                     'Order_ID': row['Order_ID'],
@@ -998,8 +997,9 @@ def main_app(user):
                                 color=alt.Color(field="Brand", type="nominal", legend=alt.Legend(title="品牌", orient="bottom")),
                                 tooltip=[alt.Tooltip("Brand", title="品牌"), alt.Tooltip("Subtotal", title="銷售總額"), alt.Tooltip("Percentage", title="佔比")]
                             )
-                            pie_brand = base_brand.mark_arc(innerRadius=0)
-                            text_brand = base_brand.mark_text(size=12, fill="white", fontWeight="bold").encode(text="Label:N")
+                            # [修正] 加上 outerRadius, 並且 text 加上 radius 讓字往外推
+                            pie_brand = base_brand.mark_arc(innerRadius=0, outerRadius=130)
+                            text_brand = base_brand.mark_text(size=12, fill="white", fontWeight="bold", radius=80).encode(text="Label:N")
                             
                             chart_brand = (pie_brand + text_brand).properties(height=350)
                             st.altair_chart(chart_brand, use_container_width=True)
@@ -1018,8 +1018,9 @@ def main_app(user):
                                 color=alt.Color(field="Category", type="nominal", legend=alt.Legend(title="分類", orient="bottom")),
                                 tooltip=[alt.Tooltip("Category", title="分類"), alt.Tooltip("Subtotal", title="銷售總額"), alt.Tooltip("Percentage", title="佔比")]
                             )
-                            pie_cat = base_cat.mark_arc(innerRadius=60)
-                            text_cat = base_cat.mark_text(size=12, fill="white", fontWeight="bold").encode(text="Label:N")
+                            # [修正] 加上 outerRadius, 並且 text 加上 radius 讓字往外推
+                            pie_cat = base_cat.mark_arc(innerRadius=70, outerRadius=130)
+                            text_cat = base_cat.mark_text(size=12, fill="white", fontWeight="bold", radius=100).encode(text="Label:N")
                             
                             chart_cat = (pie_cat + text_cat).properties(height=350)
                             st.altair_chart(chart_cat, use_container_width=True)
@@ -1123,7 +1124,6 @@ def main_app(user):
             h4.markdown("**零售價**\n(含稅)")
             h5.markdown("") 
 
-            # [修改] add_to_cart_callback 新增 p_category 參數
             def add_to_cart_callback(p_id, p_name, p_spec, p_w, p_r, q_key, p_brand, p_category):
                 qty = st.session_state[q_key]
                 if qty <= 0: return
@@ -1133,7 +1133,7 @@ def main_app(user):
                     st.session_state.cart[p_id] = {
                         "id": p_id, "name": p_name, "spec": p_spec,
                         "wholesale_price": int(p_w), "retail_price": int(p_r),
-                        "brand": p_brand, "category": p_category, "qty": qty # [新增] 寫入 Category
+                        "brand": p_brand, "category": p_category, "qty": qty
                     }
                 st.toast(f"已加入 {p_name} x {qty}", icon="🛒")
                 st.session_state[q_key] = 1
@@ -1152,7 +1152,6 @@ def main_app(user):
                 with c3: st.markdown(f"<div style='color:#ff5500; font-weight:bold;'>${int(sku['Wholesale_Price'])}</div>", unsafe_allow_html=True)
                 with c4: st.markdown(f"<div style='color:#666;'>${int(sku['Retail_Price'])}</div>", unsafe_allow_html=True)
                 with c5:
-                    # [修改] 傳入 Category 參數
                     st.button("ADD", key=f"add_{sku['Product_ID']}_{selected_color}_{i}", type="primary", use_container_width=True,
                         on_click=add_to_cart_callback,
                         args=(sku['Product_ID'], current_name, f"{selected_color} / {str(sku['Size'])}", sku['Wholesale_Price'], sku['Retail_Price'], qty_key, current_product_data.iloc[0]['Brand'], current_product_data.iloc[0]['Category']))
@@ -1261,7 +1260,7 @@ def main_app(user):
                         st.warning(msg, icon="⚠️")
 
                     for item in data['items']:
-                        c_name, c_qty, c_del, c_price = st.columns([2.5, 1.5, 0.5, 1.2], vertical_alignment="center")
+                        c_name, c_qty, c_del, c_price = st.columns([3.2, 1.0, 0.5, 1.0], vertical_alignment="center")
                         
                         with c_name:
                             st.markdown(f"<div style='line-height:1.2; font-weight:bold;'>{item['name']}</div><div style='color:#cccccc; font-size:12px; margin-top:2px;'>{item['spec']}</div>", unsafe_allow_html=True)
