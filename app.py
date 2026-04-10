@@ -205,7 +205,6 @@ def get_products_data():
         try:
             df = conn.read(spreadsheet=SHEET_URL, worksheet="Products")
             df.columns = df.columns.str.strip()
-            # 資料清洗
             if 'Size' in df.columns:
                 df['Size'] = df['Size'].astype(str).str.strip()
             if 'Name' in df.columns:
@@ -764,48 +763,64 @@ def main_app(user):
                                 new_note = ic2.text_area("備註 (買家可見)", value=str(row['Admin_Note']) if pd.notna(row['Admin_Note']) else "", key=note_key, height=100)
                                 new_discount = ic3.number_input("額外折扣/調整 (+扣款, -加價)", value=int(row.get('Extra_Discount', 0)), key=disc_key)
                                 
-                                if st.button("💾 更新訂單並通知客戶", key=f"save_all_{row['Order_ID']}", type="primary"):
-                                    try:
-                                        final_status_list = [new_logistics, new_payment]
-                                        if new_logistics == "已完成" and new_payment == "未付款":
-                                            st.warning("提醒：您將訂單設為「已完成」但「未付款」")
-                                        
-                                        final_status_str = ", ".join(final_status_list)
-
-                                        df_curr = get_data("Orders")
-                                        t_idx = df_curr[df_curr['Order_ID'] == row['Order_ID']].index
-                                        if not t_idx.empty:
-                                            idx = t_idx[0]
-                                            df_curr.at[idx, 'Status'] = final_status_str
-                                            df_curr.at[idx, 'Tracking_Number'] = new_track
-                                            df_curr.at[idx, 'Admin_Note'] = new_note
-                                            df_curr.at[idx, 'Extra_Discount'] = new_discount
+                                # [新增] 儲存與刪除的雙按鈕並排
+                                act_c1, act_c2 = st.columns([3, 1])
+                                with act_c1:
+                                    if st.button("💾 更新訂單並通知客戶", key=f"save_all_{row['Order_ID']}", type="primary", use_container_width=True):
+                                        try:
+                                            final_status_list = [new_logistics, new_payment]
+                                            if new_logistics == "已完成" and new_payment == "未付款":
+                                                st.warning("提醒：您將訂單設為「已完成」但「未付款」")
                                             
-                                            org_sub = df_curr.at[idx, 'Subtotal']
-                                            org_tax = df_curr.at[idx, 'Tax']
-                                            org_ship = df_curr.at[idx, 'Shipping']
-                                            new_total = org_sub + org_tax + org_ship - new_discount
-                                            df_curr.at[idx, 'Total'] = new_total
+                                            final_status_str = ", ".join(final_status_list)
+    
+                                            df_curr = get_data("Orders")
+                                            t_idx = df_curr[df_curr['Order_ID'] == row['Order_ID']].index
+                                            if not t_idx.empty:
+                                                idx = t_idx[0]
+                                                df_curr.at[idx, 'Status'] = final_status_str
+                                                df_curr.at[idx, 'Tracking_Number'] = new_track
+                                                df_curr.at[idx, 'Admin_Note'] = new_note
+                                                df_curr.at[idx, 'Extra_Discount'] = new_discount
+                                                
+                                                org_sub = df_curr.at[idx, 'Subtotal']
+                                                org_tax = df_curr.at[idx, 'Tax']
+                                                org_ship = df_curr.at[idx, 'Shipping']
+                                                new_total = org_sub + org_tax + org_ship - new_discount
+                                                df_curr.at[idx, 'Total'] = new_total
+                                                
+                                                update_data("Orders", df_curr)
+                                                st.success(f"訂單已更新！狀態：[{final_status_str}]")
+                                                
+                                                o_data = {
+                                                    "Order_ID": row['Order_ID'], "Customer_Name": row['Customer_Name'],
+                                                    "Email": row['Email'], "Status": final_status_str,
+                                                    "Total": new_total, "Tracking_Number": new_track, "Admin_Note": new_note,
+                                                    "Extra_Discount": new_discount
+                                                }
+                                                c_items = json.loads(row['Items_Json'])
+                                                
+                                                with st.spinner("正在寄送通知信..."):
+                                                    send_order_email(o_data, c_items, is_update=True)
+                                                    st.toast("信件已寄出！", icon="📧")
+                                                
+                                                time.sleep(1)
+                                                st.rerun()
+                                        except Exception as e:
+                                            st.error(f"更新失敗: {e}")
                                             
+                                with act_c2:
+                                    if st.button("🗑️ 刪除訂單", key=f"delete_{row['Order_ID']}", use_container_width=True, help="注意：刪除後無法復原！"):
+                                        try:
+                                            df_curr = get_data("Orders")
+                                            df_curr = df_curr[df_curr['Order_ID'] != row['Order_ID']]
                                             update_data("Orders", df_curr)
-                                            st.success(f"訂單已更新！狀態：[{final_status_str}]")
-                                            
-                                            o_data = {
-                                                "Order_ID": row['Order_ID'], "Customer_Name": row['Customer_Name'],
-                                                "Email": row['Email'], "Status": final_status_str,
-                                                "Total": new_total, "Tracking_Number": new_track, "Admin_Note": new_note,
-                                                "Extra_Discount": new_discount
-                                            }
-                                            c_items = json.loads(row['Items_Json'])
-                                            
-                                            with st.spinner("正在寄送通知信..."):
-                                                send_order_email(o_data, c_items, is_update=True)
-                                                st.toast("信件已寄出！", icon="📧")
-                                            
+                                            log_system_event(user, "Delete Order", f"Deleted Order ID: {row['Order_ID']}")
+                                            st.success(f"訂單 {row['Order_ID']} 已成功刪除！")
                                             time.sleep(1)
                                             st.rerun()
-                                    except Exception as e:
-                                        st.error(f"更新失敗: {e}")
+                                        except Exception as e:
+                                            st.error(f"刪除失敗: {e}")
 
                     else: st.info("目前無任何訂單")
                 except Exception as e: st.error(f"讀取失敗: {e}")
@@ -997,7 +1012,6 @@ def main_app(user):
                                 color=alt.Color(field="Brand", type="nominal", legend=alt.Legend(title="品牌", orient="bottom")),
                                 tooltip=[alt.Tooltip("Brand", title="品牌"), alt.Tooltip("Subtotal", title="銷售總額"), alt.Tooltip("Percentage", title="佔比")]
                             )
-                            # [修正] 加上 outerRadius, 並且 text 加上 radius 讓字往外推
                             pie_brand = base_brand.mark_arc(innerRadius=0, outerRadius=130)
                             text_brand = base_brand.mark_text(size=12, fill="white", fontWeight="bold", radius=80).encode(text="Label:N")
                             
@@ -1018,7 +1032,6 @@ def main_app(user):
                                 color=alt.Color(field="Category", type="nominal", legend=alt.Legend(title="分類", orient="bottom")),
                                 tooltip=[alt.Tooltip("Category", title="分類"), alt.Tooltip("Subtotal", title="銷售總額"), alt.Tooltip("Percentage", title="佔比")]
                             )
-                            # [修正] 加上 outerRadius, 並且 text 加上 radius 讓字往外推
                             pie_cat = base_cat.mark_arc(innerRadius=70, outerRadius=130)
                             text_cat = base_cat.mark_text(size=12, fill="white", fontWeight="bold", radius=100).encode(text="Label:N")
                             
