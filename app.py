@@ -205,6 +205,7 @@ def get_products_data():
         try:
             df = conn.read(spreadsheet=SHEET_URL, worksheet="Products")
             df.columns = df.columns.str.strip()
+            # 資料清洗
             if 'Size' in df.columns:
                 df['Size'] = df['Size'].astype(str).str.strip()
             if 'Name' in df.columns:
@@ -279,8 +280,7 @@ def update_data(worksheet, df):
                 get_brand_rules.clear()
             if worksheet == "Announcements":
                 get_announcement.clear()
-            if worksheet == "SystemLogs": 
-                get_data.clear()
+            # 修正 Bug：移除了之前可能導致出錯的 get_data.clear()
             return 
         except Exception as e:
             if "429" in str(e):
@@ -752,21 +752,28 @@ def main_app(user):
                                 
                                 default_pay_idx = 1 if "已付款" in current_status else 0
 
-                                col_s1, col_s2 = st.columns(2)
-                                with col_s1:
-                                    new_logistics = st.selectbox("物流狀態", ["待處理", "處理中", "已出貨", "已部分出貨", "已完成"], index=default_logi_idx, key=logi_key)
-                                with col_s2:
-                                    new_payment = st.selectbox("金流狀態", ["未付款", "已付款"], index=default_pay_idx, key=pay_key)
+                                # [關鍵修復] 使用 st.form 將更新區域打包，避免每次選單變更就重跑導致狀態遺失
+                                with st.form(key=f"order_update_form_{row['Order_ID']}"):
+                                    col_s1, col_s2 = st.columns(2)
+                                    with col_s1:
+                                        new_logistics = st.selectbox("物流狀態", ["待處理", "處理中", "已出貨", "已部分出貨", "已完成"], index=default_logi_idx, key=logi_key)
+                                    with col_s2:
+                                        new_payment = st.selectbox("金流狀態", ["未付款", "已付款"], index=default_pay_idx, key=pay_key)
 
-                                ic1, ic2, ic3 = st.columns([2, 3, 1.5], vertical_alignment="bottom")
-                                new_track = ic1.text_input("物流單號", value=str(row['Tracking_Number']) if pd.notna(row['Tracking_Number']) else "", key=track_key)
-                                new_note = ic2.text_area("備註 (買家可見)", value=str(row['Admin_Note']) if pd.notna(row['Admin_Note']) else "", key=note_key, height=100)
-                                new_discount = ic3.number_input("額外折扣/調整 (+扣款, -加價)", value=int(row.get('Extra_Discount', 0)), key=disc_key)
-                                
-                                # [新增] 儲存與刪除的雙按鈕並排
-                                act_c1, act_c2 = st.columns([3, 1])
-                                with act_c1:
-                                    if st.button("💾 更新訂單並通知客戶", key=f"save_all_{row['Order_ID']}", type="primary", use_container_width=True):
+                                    ic1, ic2, ic3 = st.columns([2, 3, 1.5], vertical_alignment="bottom")
+                                    new_track = ic1.text_input("物流單號", value=str(row['Tracking_Number']) if pd.notna(row['Tracking_Number']) else "", key=track_key)
+                                    new_note = ic2.text_area("備註 (買家可見)", value=str(row['Admin_Note']) if pd.notna(row['Admin_Note']) else "", key=note_key, height=100)
+                                    new_discount = ic3.number_input("額外折扣/調整 (+扣款, -加價)", value=int(row.get('Extra_Discount', 0)), key=disc_key)
+                                    
+                                    act_c1, act_c2 = st.columns([3, 1])
+                                    with act_c1:
+                                        # 在 form 裡面必須使用 st.form_submit_button
+                                        btn_update = st.form_submit_button("💾 更新訂單並通知客戶", type="primary", use_container_width=True)
+                                    with act_c2:
+                                        btn_delete = st.form_submit_button("🗑️ 刪除訂單", use_container_width=True, help="注意：刪除後無法復原！")
+
+                                    # 當按下「更新訂單」時執行的邏輯
+                                    if btn_update:
                                         try:
                                             final_status_list = [new_logistics, new_payment]
                                             if new_logistics == "已完成" and new_payment == "未付款":
@@ -809,8 +816,8 @@ def main_app(user):
                                         except Exception as e:
                                             st.error(f"更新失敗: {e}")
                                             
-                                with act_c2:
-                                    if st.button("🗑️ 刪除訂單", key=f"delete_{row['Order_ID']}", use_container_width=True, help="注意：刪除後無法復原！"):
+                                    # 當按下「刪除訂單」時執行的邏輯
+                                    if btn_delete:
                                         try:
                                             df_curr = get_data("Orders")
                                             df_curr = df_curr[df_curr['Order_ID'] != row['Order_ID']]
