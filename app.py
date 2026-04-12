@@ -280,7 +280,6 @@ def update_data(worksheet, df):
                 get_brand_rules.clear()
             if worksheet == "Announcements":
                 get_announcement.clear()
-            # 修正 Bug：移除了之前可能導致出錯的 get_data.clear()
             return 
         except Exception as e:
             if "429" in str(e):
@@ -752,7 +751,7 @@ def main_app(user):
                                 
                                 default_pay_idx = 1 if "已付款" in current_status else 0
 
-                                # [關鍵修復] 使用 st.form 將更新區域打包，避免每次選單變更就重跑導致狀態遺失
+                                # [關鍵修復] 表單包裝，讓下拉選單與輸入框可以穩定填寫
                                 with st.form(key=f"order_update_form_{row['Order_ID']}"):
                                     col_s1, col_s2 = st.columns(2)
                                     with col_s1:
@@ -767,12 +766,10 @@ def main_app(user):
                                     
                                     act_c1, act_c2 = st.columns([3, 1])
                                     with act_c1:
-                                        # 在 form 裡面必須使用 st.form_submit_button
                                         btn_update = st.form_submit_button("💾 更新訂單並通知客戶", type="primary", use_container_width=True)
                                     with act_c2:
                                         btn_delete = st.form_submit_button("🗑️ 刪除訂單", use_container_width=True, help="注意：刪除後無法復原！")
 
-                                    # 當按下「更新訂單」時執行的邏輯
                                     if btn_update:
                                         try:
                                             final_status_list = [new_logistics, new_payment]
@@ -782,18 +779,30 @@ def main_app(user):
                                             final_status_str = ", ".join(final_status_list)
     
                                             df_curr = get_data("Orders")
+                                            
+                                            # [防呆機制] 強制將欄位轉為文字型態，避免空欄位被誤判為 float64 導致寫入報錯
+                                            for col in ['Tracking_Number', 'Admin_Note', 'Status', 'Order_ID']:
+                                                if col not in df_curr.columns:
+                                                    df_curr[col] = ""
+                                                df_curr[col] = df_curr[col].astype(str).replace('nan', '')
+                                                
+                                            df_curr['Extra_Discount'] = pd.to_numeric(df_curr.get('Extra_Discount', 0), errors='coerce').fillna(0).astype(int)
+                                            df_curr['Subtotal'] = pd.to_numeric(df_curr.get('Subtotal', 0), errors='coerce').fillna(0).astype(int)
+                                            df_curr['Tax'] = pd.to_numeric(df_curr.get('Tax', 0), errors='coerce').fillna(0).astype(int)
+                                            df_curr['Shipping'] = pd.to_numeric(df_curr.get('Shipping', 0), errors='coerce').fillna(0).astype(int)
+
                                             t_idx = df_curr[df_curr['Order_ID'] == row['Order_ID']].index
                                             if not t_idx.empty:
                                                 idx = t_idx[0]
                                                 df_curr.at[idx, 'Status'] = final_status_str
-                                                df_curr.at[idx, 'Tracking_Number'] = new_track
-                                                df_curr.at[idx, 'Admin_Note'] = new_note
-                                                df_curr.at[idx, 'Extra_Discount'] = new_discount
+                                                df_curr.at[idx, 'Tracking_Number'] = str(new_track)
+                                                df_curr.at[idx, 'Admin_Note'] = str(new_note)
+                                                df_curr.at[idx, 'Extra_Discount'] = int(new_discount)
                                                 
                                                 org_sub = df_curr.at[idx, 'Subtotal']
                                                 org_tax = df_curr.at[idx, 'Tax']
                                                 org_ship = df_curr.at[idx, 'Shipping']
-                                                new_total = org_sub + org_tax + org_ship - new_discount
+                                                new_total = org_sub + org_tax + org_ship - int(new_discount)
                                                 df_curr.at[idx, 'Total'] = new_total
                                                 
                                                 update_data("Orders", df_curr)
@@ -816,7 +825,6 @@ def main_app(user):
                                         except Exception as e:
                                             st.error(f"更新失敗: {e}")
                                             
-                                    # 當按下「刪除訂單」時執行的邏輯
                                     if btn_delete:
                                         try:
                                             df_curr = get_data("Orders")
