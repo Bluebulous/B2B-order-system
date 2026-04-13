@@ -155,19 +155,19 @@ st.markdown(
     .badge-done { background-color: #2c3e50; }
     .badge-unpaid { background-color: #c0392b; }
 
-    /* === 🛒 購物車專用微調 === */
-    /* 1. 強制讓 Number Input 顯示為固定寬度 (120px) */
+    /* === 🛒 購物車與商品列表的數字輸入框微調 === */
     div[data-testid="stVerticalBlockBorderWrapper"] div[data-testid="stNumberInput"] {
-        width: 120px !important; 
-        min-width: 120px !important;
+        /* 雙重限制，保證完美長短 */
+        max-width: 140px !important; /* 限制最大寬度，避免收起側欄時過長 */
+        min-width: 120px !important; /* 確保最小寬度，防止展開側欄時加減號消失 */
     }
     
-    /* 2. 確保輸入框高度適中 */
+    /* 確保輸入框高度適中 */
     div[data-testid="stVerticalBlockBorderWrapper"] div[data-baseweb="input"] {
         min-height: 40px !important;
     }
     
-    /* 3. 讓刪除按鈕垂直置中，對齊輸入框 */
+    /* 讓刪除按鈕垂直置中，對齊輸入框 */
     div[data-testid="stVerticalBlockBorderWrapper"] button[kind="secondary"] {
        margin-top: 2px;
     }
@@ -205,7 +205,6 @@ def get_products_data():
         try:
             df = conn.read(spreadsheet=SHEET_URL, worksheet="Products")
             df.columns = df.columns.str.strip()
-            # 資料清洗
             if 'Size' in df.columns:
                 df['Size'] = df['Size'].astype(str).str.strip()
             if 'Name' in df.columns:
@@ -751,7 +750,6 @@ def main_app(user):
                                 
                                 default_pay_idx = 1 if "已付款" in current_status else 0
 
-                                # [關鍵修復] 表單包裝，讓下拉選單與輸入框可以穩定填寫
                                 with st.form(key=f"order_update_form_{row['Order_ID']}"):
                                     col_s1, col_s2 = st.columns(2)
                                     with col_s1:
@@ -780,7 +778,6 @@ def main_app(user):
     
                                             df_curr = get_data("Orders")
                                             
-                                            # [防呆機制] 強制將欄位轉為文字型態，避免空欄位被誤判為 float64 導致寫入報錯
                                             for col in ['Tracking_Number', 'Admin_Note', 'Status', 'Order_ID']:
                                                 if col not in df_curr.columns:
                                                     df_curr[col] = ""
@@ -1132,6 +1129,7 @@ def main_app(user):
         return
 
     # 3. 商店頁
+    # [購物車欄位] 確保這裡的比例配合上方 CSS 的最小與最大寬度
     col_visual, col_select, col_cart = st.columns([1.5, 1.5, 2.0], gap="medium")
     current_name = st.session_state.current_product_name
     current_product_data = df_products[df_products['Name'] == current_name]
@@ -1288,7 +1286,8 @@ def main_app(user):
                         st.warning(msg, icon="⚠️")
 
                     for item in data['items']:
-                        c_name, c_qty, c_del, c_price = st.columns([3.2, 1.0, 0.5, 1.0], vertical_alignment="center")
+                        # [關鍵修改] 配合 CSS 控制長短，給予合適的欄位比例
+                        c_name, c_qty, c_del, c_price = st.columns([2.0, 1.8, 0.4, 1.2], vertical_alignment="center")
                         
                         with c_name:
                             st.markdown(f"<div style='line-height:1.2; font-weight:bold;'>{item['name']}</div><div style='color:#cccccc; font-size:12px; margin-top:2px;'>{item['spec']}</div>", unsafe_allow_html=True)
@@ -1391,13 +1390,25 @@ def main_app(user):
 
                     try:
                         old_orders = get_data("Orders")
+                        
+                        # --- [關鍵防呆修復] 結帳時，強制確保所有空欄位都是文字，避免 float64 錯誤 ---
+                        for col in ['Tracking_Number', 'Admin_Note', 'Status', 'Order_ID']:
+                            if col not in old_orders.columns:
+                                old_orders[col] = ""
+                            old_orders[col] = old_orders[col].astype(str).replace('nan', '')
+                        
+                        for col in ['Extra_Discount', 'Subtotal', 'Tax', 'Shipping', 'Total']:
+                            if col in old_orders.columns:
+                                old_orders[col] = pd.to_numeric(old_orders[col], errors='coerce').fillna(0).astype(int)
+
                         if is_editing:
                             target_idx = old_orders[old_orders['Order_ID'] == order_id].index
                             if not target_idx.empty:
                                 idx = target_idx[0]
                                 for key, value in order_data.items():
                                     old_orders.at[idx, key] = value
-                                    log_system_event(user, "Checkout", f"Order ID: {order_id}")
+                                    
+                                log_system_event(user, "Admin Edit Checkout", f"Order ID: {order_id}")
                                 update_data("Orders", old_orders)
                                 st.success(f"訂單 {order_id} 修改完成！")
                                 with st.spinner("正在寄送通知信給客戶..."):
