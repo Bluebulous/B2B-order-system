@@ -155,19 +155,19 @@ st.markdown(
     .badge-done { background-color: #2c3e50; }
     .badge-unpaid { background-color: #c0392b; }
 
-    /* === 🛒 購物車與商品列表的數字輸入框微調 === */
+    /* === 🛒 購物車專用微調 === */
+    /* 1. 強制讓 Number Input 顯示為固定寬度 (120px) */
     div[data-testid="stVerticalBlockBorderWrapper"] div[data-testid="stNumberInput"] {
-        /* 雙重限制，保證完美長短 */
-        max-width: 140px !important; /* 限制最大寬度，避免收起側欄時過長 */
-        min-width: 120px !important; /* 確保最小寬度，防止展開側欄時加減號消失 */
+        width: 120px !important; 
+        min-width: 120px !important;
     }
     
-    /* 確保輸入框高度適中 */
+    /* 2. 確保輸入框高度適中 */
     div[data-testid="stVerticalBlockBorderWrapper"] div[data-baseweb="input"] {
         min-height: 40px !important;
     }
     
-    /* 讓刪除按鈕垂直置中，對齊輸入框 */
+    /* 3. 讓刪除按鈕垂直置中，對齊輸入框 */
     div[data-testid="stVerticalBlockBorderWrapper"] button[kind="secondary"] {
        margin-top: 2px;
     }
@@ -205,6 +205,7 @@ def get_products_data():
         try:
             df = conn.read(spreadsheet=SHEET_URL, worksheet="Products")
             df.columns = df.columns.str.strip()
+            # 資料清洗
             if 'Size' in df.columns:
                 df['Size'] = df['Size'].astype(str).str.strip()
             if 'Name' in df.columns:
@@ -724,11 +725,15 @@ def main_app(user):
                                         st.markdown(f"<span style='color:{color}'>**調整:** {sign}${abs(extra_disc_show)}</span>", unsafe_allow_html=True)
                                     st.markdown(f"### Total: ${row['Total']}")
                                     
+                                    # [修改] 將原有的折扣一併打包進 session，讓購物車知道先前的調整金額
                                     if st.button("✏️ 修改內容 (進入購物車)", key=f"admin_edit_{row['Order_ID']}", type="primary"):
                                         st.session_state.cart = json.loads(row['Items_Json'])
                                         st.session_state.editing_order_id = row['Order_ID']
                                         st.session_state.editing_customer_info = {
-                                            "Customer_Name": row['Customer_Name'], "Email": row['Email'], "Phone": row['Phone']
+                                            "Customer_Name": row['Customer_Name'], 
+                                            "Email": row['Email'], 
+                                            "Phone": row['Phone'],
+                                            "Extra_Discount": int(row.get('Extra_Discount', 0))
                                         }
                                         st.session_state.page = 'shop'
                                         st.rerun()
@@ -1129,7 +1134,6 @@ def main_app(user):
         return
 
     # 3. 商店頁
-    # [購物車欄位] 確保這裡的比例配合上方 CSS 的最小與最大寬度
     col_visual, col_select, col_cart = st.columns([1.5, 1.5, 2.0], gap="medium")
     current_name = st.session_state.current_product_name
     current_product_data = df_products[df_products['Name'] == current_name]
@@ -1286,7 +1290,6 @@ def main_app(user):
                         st.warning(msg, icon="⚠️")
 
                     for item in data['items']:
-                        # [關鍵修改] 配合 CSS 控制長短，給予合適的欄位比例
                         c_name, c_qty, c_del, c_price = st.columns([2.0, 1.8, 0.4, 1.2], vertical_alignment="center")
                         
                         with c_name:
@@ -1320,7 +1323,25 @@ def main_app(user):
                     shipping = SHIPPING_FEE
                     shipping_msg = f"運費 ${SHIPPING_FEE}"
 
-                grand_total = grand_total_subtotal + grand_total_tax + shipping
+                # --- [新增] 管理員調整總價功能 ---
+                is_editing = st.session_state.get('editing_order_id') is not None
+                default_discount = 0
+                if is_editing:
+                    default_discount = int(st.session_state.get('editing_customer_info', {}).get('Extra_Discount', 0))
+
+                extra_discount = 0
+                if user['Username'] in ADMIN_USERS:
+                    st.markdown("---")
+                    extra_discount = st.number_input(
+                        "🔧 管理員：總價手動調整 (+輸入折扣扣除, -輸入額外加價)", 
+                        value=default_discount, 
+                        step=10, 
+                        key="cart_extra_discount", 
+                        help="可以直接改變最後的結帳總金額"
+                    )
+                # ---------------------------------
+
+                grand_total = grand_total_subtotal + grand_total_tax + shipping - extra_discount
                 
                 r1, r2 = st.columns(2)
                 r1.text("小計 (Subtotal)")
@@ -1329,13 +1350,21 @@ def main_app(user):
                 r2.text(f"${grand_total_tax}")
                 r1.text("運費 (Shipping)")
                 r2.text(shipping_msg)
+                
+                # --- [新增] 顯示調整金額 ---
+                if extra_discount != 0:
+                    r1.markdown("**手動調整 (Adjustment)**")
+                    sign = "-" if extra_discount > 0 else "+"
+                    color = "green" if extra_discount > 0 else "red"
+                    r2.markdown(f"<span style='color:{color}; font-weight:bold;'>{sign}${abs(extra_discount)}</span>", unsafe_allow_html=True)
+                # -------------------------
+
                 r1.markdown("#### 總計(含稅)")
                 r2.markdown(f"#### ${grand_total}")
                 
                 if is_order_free_shipping: st.info("🎉 訂單已享免運優惠！")
                 else: st.warning(f"⚠️ 全單未達免運標準，需付運費 ${SHIPPING_FEE}")
                 
-                is_editing = st.session_state.get('editing_order_id') is not None
                 if is_editing:
                     btn_text = "💾 確認修改並儲存 (Admin Update)"
                     client_name = st.session_state.get('editing_customer_info', {}).get('Customer_Name', 'Unknown')
@@ -1383,7 +1412,7 @@ def main_app(user):
                         "Items_Json": json.dumps(final_cart_data, ensure_ascii=False),
                         "Subtotal": grand_total_subtotal, "Tax": grand_total_tax, 
                         "Shipping": shipping, "Total": grand_total, "Status": c_status,
-                        "Extra_Discount": 0 
+                        "Extra_Discount": extra_discount # [修改] 套用管理員在購物車內設定的金額
                     }
                     if 'Tracking_Number' not in order_data: order_data['Tracking_Number'] = ""
                     if 'Admin_Note' not in order_data: order_data['Admin_Note'] = ""
@@ -1391,7 +1420,6 @@ def main_app(user):
                     try:
                         old_orders = get_data("Orders")
                         
-                        # --- [關鍵防呆修復] 結帳時，強制確保所有空欄位都是文字，避免 float64 錯誤 ---
                         for col in ['Tracking_Number', 'Admin_Note', 'Status', 'Order_ID']:
                             if col not in old_orders.columns:
                                 old_orders[col] = ""
