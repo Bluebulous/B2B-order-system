@@ -1469,13 +1469,20 @@ def login_page():
             u = st.text_input("Username / Email")
             p = st.text_input("Password", type="password")
             if st.form_submit_button("Login", width="stretch", type="primary"):
-                users = get_data("Users")
-                match = users[users['Username'] == u]
-                if not match.empty and str(match.iloc[0]['Password']) == p:
-                    st.session_state['user'] = match.iloc[0]
-                    log_system_event(match.iloc[0], "Login", "User logged in")
-                    st.rerun()
-                else: st.error("帳號或密碼錯誤")
+                with st.spinner("正在連線驗證中..."):
+                    users = get_data("Users")
+                    
+                    # --- [新增] 防呆機制：檢查資料表是否成功讀取 ---
+                    if users.empty or 'Username' not in users.columns:
+                        st.error("⚠️ 系統連線擁斷 (Google API 暫時限流)，請等待 3~5 分鐘後再試！")
+                    else:
+                        match = users[users['Username'] == u]
+                        if not match.empty and str(match.iloc[0]['Password']) == p:
+                            st.session_state['user'] = match.iloc[0]
+                            log_system_event(match.iloc[0], "Login", "User logged in")
+                            st.rerun()
+                        else: 
+                            st.error("帳號或密碼錯誤")
 
 if __name__ == "__main__":
     if 'user' not in st.session_state:
