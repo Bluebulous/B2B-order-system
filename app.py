@@ -1,11 +1,10 @@
 import streamlit as st
 import pandas as pd
 import altair as alt
-from streamlit_gsheets import GSheetsConnection
 from datetime import datetime
 import json
 import time
-import random
+from supabase import create_client, Client
 
 # Email 相關模組
 import smtplib
@@ -19,9 +18,15 @@ st.set_page_config(
     page_icon="https://raw.githubusercontent.com/Bluebulous/product-images/main/Bluebulous%20logo.jpg"
 )
 
-# Google Sheets 連線
-conn = st.connection("gsheets", type=GSheetsConnection)
-SHEET_URL = "https://docs.google.com/spreadsheets/d/1nuIdMqrRKhWIbuqsz0eVwKYr24HLDDdV7CNn_SPiSYI/edit"
+# --- Supabase 連線設定 ---
+SUPABASE_URL = "https://thfvtscpmssozaqiitgq.supabase.co"
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRoZnZ0c2NwbXNzb3phcWlpdGdxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc2MDQ3NjEsImV4cCI6MjA5MzE4MDc2MX0.0fbvFu6FCH0c1UUkHx3wCJFvzx2Uu9eHqaTUyAD8t0U"
+
+@st.cache_resource
+def init_connection():
+    return create_client(SUPABASE_URL, SUPABASE_KEY)
+
+supabase: Client = init_connection()
 
 # B2B 基礎規則
 TAX_RATE = 0.05
@@ -156,18 +161,13 @@ st.markdown(
     .badge-unpaid { background-color: #c0392b; }
 
     /* === 🛒 購物車專用微調 === */
-    /* 1. 強制讓 Number Input 顯示為固定寬度 (120px) */
     div[data-testid="stVerticalBlockBorderWrapper"] div[data-testid="stNumberInput"] {
         max-width: 140px !important;
         min-width: 120px !important;
     }
-    
-    /* 2. 確保輸入框高度適中 */
     div[data-testid="stVerticalBlockBorderWrapper"] div[data-baseweb="input"] {
         min-height: 40px !important;
     }
-    
-    /* 3. 讓刪除按鈕垂直置中，對齊輸入框 */
     div[data-testid="stVerticalBlockBorderWrapper"] button[kind="secondary"] {
        margin-top: 2px;
     }
@@ -196,113 +196,84 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# --- 3. 輔助函數 ---
+# --- 3. 輔助函數 (改為 Supabase 版) ---
 
 @st.cache_data(ttl=3600)
 def get_products_data():
-    max_retries = 5 
-    for attempt in range(max_retries):
-        try:
-            df = conn.read(spreadsheet=SHEET_URL, worksheet="Products")
-            df.columns = df.columns.str.strip()
-            if 'Size' in df.columns:
-                df['Size'] = df['Size'].astype(str).str.strip()
-            if 'Name' in df.columns:
-                df['Name'] = df['Name'].astype(str).str.strip()
-            if 'Color' in df.columns:
-                df['Color'] = df['Color'].astype(str).str.strip()
-            if 'Category' in df.columns:
-                df['Category'] = df['Category'].astype(str).str.strip()
-            if 'Brand' in df.columns:
-                df['Brand'] = df['Brand'].astype(str).str.strip()
-                
-            df = df.apply(lambda x: x.str.strip() if x.dtype == "object" else x)
-            return df
-        except Exception as e:
-            if "429" in str(e) or "Quota exceeded" in str(e):
-                wait_time = (2 ** attempt) + random.random()
-                if attempt < max_retries - 1:
-                    time.sleep(wait_time) 
-                    continue
-            st.error(f"無法讀取產品資料 (請稍後再試): {e}")
-            return pd.DataFrame()
-    return pd.DataFrame()
+    try:
+        response = supabase.table("products").select("*").execute()
+        df = pd.DataFrame(response.data)
+        if not df.empty:
+            for col in ['Size', 'Name', 'Color', 'Category', 'Brand']:
+                if col in df.columns:
+                    df[col] = df[col].astype(str).str.strip()
+        return df
+    except Exception as e:
+        st.error(f"無法讀取產品資料: {e}")
+        return pd.DataFrame()
 
 @st.cache_data(ttl=3600)
 def get_brand_rules():
     try:
-        df = conn.read(spreadsheet=SHEET_URL, worksheet="BrandRules")
-        df.columns = df.columns.str.strip()
-        df = df.apply(lambda x: x.str.strip() if x.dtype == "object" else x)
-        
+        response = supabase.table("brandrules").select("*").execute()
+        df = pd.DataFrame(response.data)
         rules = {}
-        for _, row in df.iterrows():
-            rules[row['Brand']] = {
-                'wholesale_threshold': int(row['Wholesale_Threshold']),
-                'shipping_threshold': int(row['Shipping_Threshold']),
-                'discount_rate': float(row['Discount'])
-            }
+        if not df.empty:
+            for _, row in df.iterrows():
+                rules[str(row.get('Brand', '')).strip()] = {
+                    'wholesale_threshold': int(row.get('Wholesale_Threshold', 10000)),
+                    'shipping_threshold': int(row.get('Shipping_Threshold', 10000)),
+                    'discount_rate': float(row.get('Discount', 0.7))
+                }
         return rules, df
     except Exception as e:
         default_df = pd.DataFrame([{"Brand": "default", "Wholesale_Threshold": 10000, "Shipping_Threshold": 10000, "Discount": 0.7}])
         return {"default": {"wholesale_threshold": 10000, "shipping_threshold": 10000, "discount_rate": 0.7}}, default_df
 
-def get_data(worksheet, ttl=0):
-    max_retries = 5
-    for attempt in range(max_retries):
-        try:
-            df = conn.read(spreadsheet=SHEET_URL, worksheet=worksheet, ttl=ttl)
-            df.columns = df.columns.str.strip()
-            df = df.apply(lambda x: x.str.strip() if x.dtype == "object" else x)
-            return df
-        except Exception as e:
-            if "429" in str(e) or "Quota exceeded" in str(e):
-                wait_time = (2 ** attempt) + random.random()
-                if attempt < max_retries - 1:
-                    time.sleep(wait_time)
-                    continue
-                else:
-                    st.error(f"⚠️ 系統繁忙 (Google API 流量限制)，請稍後再試。")
-                    return pd.DataFrame()
-            else:
-                return pd.DataFrame()
-    return pd.DataFrame()
+def get_data(table_name):
+    try:
+        response = supabase.table(table_name).select("*").execute()
+        df = pd.DataFrame(response.data)
+        return df
+    except Exception as e:
+        print(f"Read {table_name} error: {e}")
+        return pd.DataFrame()
 
-def update_data(worksheet, df):
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            conn.update(spreadsheet=SHEET_URL, worksheet=worksheet, data=df)
-            if worksheet == "Products":
-                get_products_data.clear()
-            if worksheet == "BrandRules":
-                get_brand_rules.clear()
-            if worksheet == "Announcements":
-                get_announcement.clear()
-            return 
-        except Exception as e:
-            if "429" in str(e):
-                wait_time = (2 ** attempt) + 2
-                if attempt == 0:
-                    st.warning("系統繁忙，正在排隊寫入資料...")
-                time.sleep(wait_time)
-            else:
-                st.error(f"儲存失敗: {e}")
-                return
+def insert_data(table_name, data_dict):
+    try:
+        supabase.table(table_name).insert(data_dict).execute()
+        return True
+    except Exception as e:
+        st.error(f"寫入 {table_name} 失敗: {e}")
+        return False
+
+def update_data_by_id(table_name, match_col, match_val, update_dict):
+    try:
+        supabase.table(table_name).update(update_dict).eq(match_col, match_val).execute()
+        return True
+    except Exception as e:
+        st.error(f"更新 {table_name} 失敗: {e}")
+        return False
+        
+def delete_data_by_id(table_name, match_col, match_val):
+    try:
+        supabase.table(table_name).delete().eq(match_col, match_val).execute()
+        return True
+    except Exception as e:
+        st.error(f"刪除 {table_name} 失敗: {e}")
+        return False
 
 # 寫入系統日誌 (Log)
 def log_system_event(user_data, action, details=""):
     try:
-        logs_df = conn.read(spreadsheet=SHEET_URL, worksheet="SystemLogs")
         new_log = {
             "Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "Username": user_data['Username'],
-            "Dealer": user_data['Dealer_Name'],
+            "Username": user_data.get('Username', 'Unknown'),
+            "Dealer": user_data.get('Dealer_Name', 'Unknown'),
             "Action": action,
             "Details": details
         }
-        updated_logs = pd.concat([logs_df, pd.DataFrame([new_log])], ignore_index=True)
-        conn.update(spreadsheet=SHEET_URL, worksheet="SystemLogs", data=updated_logs)
+        insert_data("systemlogs", new_log)
     except Exception as e:
         print(f"Log Error (Ignored): {e}")
 
@@ -310,9 +281,11 @@ def log_system_event(user_data, action, details=""):
 @st.cache_data(ttl=600)
 def get_announcement():
     try:
-        df = conn.read(spreadsheet=SHEET_URL, worksheet="Announcements")
+        df = get_data("announcements")
         if not df.empty and 'Message' in df.columns:
-            return str(df.iloc[0]['Message'])
+            msgs = df['Message'].dropna().tolist()
+            if msgs:
+                return str(msgs[-1])
         return ""
     except:
         return ""
@@ -453,14 +426,13 @@ def main_app(user):
         df_products = get_products_data()
         
         if df_products.empty:
-            st.error("無法載入產品資料，請檢查 Google Sheet 連線或稍後再試。")
+            st.error("無法載入產品資料，請檢查 Supabase 連線或資料表是否為空。")
             return
 
         if 'Wholesale_Price' in df_products.columns:
             df_products['Wholesale_Price'] = pd.to_numeric(df_products['Wholesale_Price'], errors='coerce').fillna(0)
         else:
-            st.error("錯誤：找不到 'Wholesale_Price' 欄位，請檢查 Google Sheet 標題列是否正確。")
-            st.write("目前欄位:", df_products.columns.tolist())
+            st.error("錯誤：找不到 'Wholesale_Price' 欄位。")
             return
 
         if 'Retail_Price' in df_products.columns:
@@ -494,8 +466,8 @@ def main_app(user):
         st.image(logo_url, width="stretch")
         st.markdown("<h3 style='text-align: center; color: #ffffff; margin-top: -10px;'>B2B採購系統 (Beta版)</h3>", unsafe_allow_html=True)
         st.divider()
-        st.markdown(f"### Hello, {user['Contact_Person']}")
-        st.caption(f"單位: {user['Dealer_Name']}")
+        st.markdown(f"### Hello, {user.get('Contact_Person', 'User')}")
+        st.caption(f"單位: {user.get('Dealer_Name', 'Unknown')}")
         st.divider()
         
         if st.session_state.cart:
@@ -524,7 +496,7 @@ def main_app(user):
         if st.button("個人資料", width="stretch"):
             st.session_state.page = 'profile'
             st.rerun()
-        if user['Username'] in ADMIN_USERS:
+        if user.get('Username') in ADMIN_USERS:
             st.markdown("---")
             if st.button("🔧 管理員後台", width="stretch"):
                 st.session_state.page = 'admin_orders'
@@ -549,51 +521,56 @@ def main_app(user):
         st.title("歷史訂單")
         with st.container(border=True):
             try:
-                orders = get_data("Orders")
-                if 'Tracking_Number' not in orders.columns: orders['Tracking_Number'] = ""
-                if 'Admin_Note' not in orders.columns: orders['Admin_Note'] = ""
-                if 'Extra_Discount' not in orders.columns: orders['Extra_Discount'] = 0 
-                orders['Extra_Discount'] = pd.to_numeric(orders['Extra_Discount'], errors='coerce').fillna(0).astype(int)
-
-                my_orders = orders[orders['Email'] == user['Username']].sort_values("Order_Time", ascending=False)
-                
-                if not my_orders.empty:
-                    for index, row in my_orders.iterrows():
-                        status_str = str(row['Status'])
-                        status_icon = ""
-                        if "已完成" in status_str: status_icon = "✅"
-                        elif "已出貨" in status_str: status_icon = "🚚"
-                        elif "處理中" in status_str: status_icon = "⏳"
-                        if "未付款" in status_str: status_icon += "🔴"
-                        elif "已付款" in status_str: status_icon += "💰"
-
-                        expander_title = f"{status_icon} {status_str} | {row['Order_Time']} | ${row['Total']}"
-                        with st.expander(expander_title):
-                            st.markdown(f"### 狀態: {display_status_badges(row['Status'])}", unsafe_allow_html=True)
-                            st.divider()
-                            c1, c2 = st.columns([1, 1])
-                            with c1:
-                                st.markdown(f"**訂單編號:** {row['Order_ID']}")
-                                st.markdown(f"**總金額:** ${row['Total']}")
-                                extra_disc = int(row.get('Extra_Discount', 0))
-                                if extra_disc != 0:
-                                    sign = "-" if extra_disc > 0 else "+"
-                                    color = "green" if extra_disc > 0 else "red"
-                                    st.markdown(f"<span style='color:{color};'>**🎁 額外調整:** {sign}${abs(extra_disc)}</span>", unsafe_allow_html=True)
-                                if pd.notna(row['Tracking_Number']) and str(row['Tracking_Number']).strip() != "":
-                                    st.info(f"📦 **物流單號:** {row['Tracking_Number']}")
-                                if pd.notna(row['Admin_Note']) and str(row['Admin_Note']).strip() != "":
-                                    st.warning(f"📝 **賣家備註:** {row['Admin_Note']}")
-                            with c2:
-                                st.markdown("**訂購內容:**")
-                                try:
-                                    items = json.loads(row['Items_Json'])
-                                    for item in items.values():
-                                        st.text(f"• {item['name']} ({item['spec']}) x{item['qty']}")
-                                except:
-                                    st.error("內容讀取失敗")
-                else:
+                orders = get_data("orders")
+                if orders.empty:
                     st.info("目前沒有訂單紀錄")
+                else:
+                    if 'Tracking_Number' not in orders.columns: orders['Tracking_Number'] = ""
+                    if 'Admin_Note' not in orders.columns: orders['Admin_Note'] = ""
+                    if 'Extra_Discount' not in orders.columns: orders['Extra_Discount'] = 0 
+                    orders['Extra_Discount'] = pd.to_numeric(orders['Extra_Discount'], errors='coerce').fillna(0).astype(int)
+
+                    my_orders = orders[orders['Email'] == user['Username']].sort_values("Order_Time", ascending=False)
+                    
+                    if not my_orders.empty:
+                        for index, row in my_orders.iterrows():
+                            status_str = str(row['Status'])
+                            status_icon = ""
+                            if "已完成" in status_str: status_icon = "✅"
+                            elif "已出貨" in status_str: status_icon = "🚚"
+                            elif "處理中" in status_str: status_icon = "⏳"
+                            if "未付款" in status_str: status_icon += "🔴"
+                            elif "已付款" in status_str: status_icon += "💰"
+
+                            expander_title = f"{status_icon} {status_str} | {row['Order_Time']} | ${row['Total']}"
+                            with st.expander(expander_title):
+                                st.markdown(f"### 狀態: {display_status_badges(row['Status'])}", unsafe_allow_html=True)
+                                st.divider()
+                                c1, c2 = st.columns([1, 1])
+                                with c1:
+                                    st.markdown(f"**訂單編號:** {row['Order_ID']}")
+                                    st.markdown(f"**總金額:** ${row['Total']}")
+                                    extra_disc = int(row.get('Extra_Discount', 0))
+                                    if extra_disc != 0:
+                                        sign = "-" if extra_disc > 0 else "+"
+                                        color = "green" if extra_disc > 0 else "red"
+                                        st.markdown(f"<span style='color:{color};'>**🎁 額外調整:** {sign}${abs(extra_disc)}</span>", unsafe_allow_html=True)
+                                    if pd.notna(row['Tracking_Number']) and str(row['Tracking_Number']).strip() != "":
+                                        st.info(f"📦 **物流單號:** {row['Tracking_Number']}")
+                                    if pd.notna(row['Admin_Note']) and str(row['Admin_Note']).strip() != "":
+                                        st.warning(f"📝 **賣家備註:** {row['Admin_Note']}")
+                                with c2:
+                                    st.markdown("**訂購內容:**")
+                                    try:
+                                        items = row['Items_Json']
+                                        if isinstance(items, str):
+                                            items = json.loads(items)
+                                        for item in items.values():
+                                            st.text(f"• {item['name']} ({item['spec']}) x{item['qty']}")
+                                    except:
+                                        st.error("內容讀取失敗")
+                    else:
+                        st.info("目前沒有您的訂單紀錄")
             except Exception as e:
                 st.error(f"讀取失敗: {e}")
         return
@@ -602,11 +579,11 @@ def main_app(user):
     if st.session_state.page == 'profile':
         st.title("個人資料")
         with st.container(border=True):
-            st.markdown(f"**單位:** {user['Dealer_Name']}")
-            st.markdown(f"**聯絡人:** {user['Contact_Person']}")
-            st.markdown(f"**登入帳號:** {user['Username']}")
-            st.markdown(f"**電話:** {user['Phone']}")
-            st.markdown(f"**地址:** {user['Address']}")
+            st.markdown(f"**單位:** {user.get('Dealer_Name', '')}")
+            st.markdown(f"**聯絡人:** {user.get('Contact_Person', '')}")
+            st.markdown(f"**登入帳號:** {user.get('Username', '')}")
+            st.markdown(f"**電話:** {user.get('Phone', '')}")
+            st.markdown(f"**地址:** {user.get('Address', '')}")
             st.divider()
             
             st.subheader("📬 通知設定")
@@ -616,21 +593,11 @@ def main_app(user):
                 
                 if st.form_submit_button("更新 Email 設定", type="primary"):
                     try:
-                        users_df = get_data("Users")
-                        if 'Contact_Email' not in users_df.columns:
-                            users_df['Contact_Email'] = ""
-                        
-                        user_idx = users_df[users_df['Username'] == user['Username']].index
-                        if not user_idx.empty:
-                            idx = user_idx[0]
-                            users_df.at[idx, 'Contact_Email'] = new_contact_email
-                            update_data("Users", users_df)
+                        if update_data_by_id("users", "Username", user['Username'], {"Contact_Email": new_contact_email}):
                             st.session_state['user']['Contact_Email'] = new_contact_email
                             st.success("✅ Email 設定已更新！")
                             time.sleep(1)
                             st.rerun()
-                        else:
-                            st.error("找不到使用者資料")
                     except Exception as e:
                         st.error(f"更新失敗: {e}")
 
@@ -650,15 +617,9 @@ def main_app(user):
                         st.error("❌ 新密碼不得為空")
                     else:
                         try:
-                            users_df = get_data("Users")
-                            user_index = users_df[users_df['Username'] == user['Username']].index
-                            if not user_index.empty:
-                                idx = user_index[0]
-                                users_df.at[idx, 'Password'] = new_pwd
-                                update_data("Users", users_df)
+                            if update_data_by_id("users", "Username", user['Username'], {"Password": new_pwd}):
                                 st.session_state['user']['Password'] = new_pwd
                                 st.success("✅ 密碼修改成功！")
-                            else: st.error("❌ 找不到使用者資料")
                         except Exception as e: st.error(f"❌ 更新失敗: {e}")
         return
 
@@ -676,13 +637,15 @@ def main_app(user):
         with tab1:
             with st.container(border=True):
                 try:
-                    orders = get_data("Orders")
-                    if 'Tracking_Number' not in orders.columns: orders['Tracking_Number'] = ""
-                    if 'Admin_Note' not in orders.columns: orders['Admin_Note'] = ""
-                    if 'Extra_Discount' not in orders.columns: orders['Extra_Discount'] = 0
-                    orders['Extra_Discount'] = orders['Extra_Discount'].fillna(0).astype(int)
+                    orders = get_data("orders")
+                    if orders.empty:
+                        st.info("目前無任何訂單")
+                    else:
+                        if 'Tracking_Number' not in orders.columns: orders['Tracking_Number'] = ""
+                        if 'Admin_Note' not in orders.columns: orders['Admin_Note'] = ""
+                        if 'Extra_Discount' not in orders.columns: orders['Extra_Discount'] = 0
+                        orders['Extra_Discount'] = orders['Extra_Discount'].fillna(0).astype(int)
 
-                    if not orders.empty:
                         all_orders = orders.sort_values("Order_Time", ascending=False)
                         st.markdown(f"共 {len(all_orders)} 筆訂單")
                         
@@ -696,7 +659,7 @@ def main_app(user):
                             elif "已付款" in status_str: status_icon += "💰"
 
                             status_badges = display_status_badges(row['Status'])
-                            expander_title = f"{status_icon} {status_str} | {row['Order_Time']} | {row['Customer_Name']} (${row['Total']})"
+                            expander_title = f"{status_icon} {status_str} | {row['Customer_Name']} (${row['Total']})"
                             
                             with st.expander(expander_title):
                                 st.markdown(f"### 目前狀態: {status_badges}", unsafe_allow_html=True)
@@ -709,7 +672,9 @@ def main_app(user):
                                 with c2:
                                     st.markdown("**訂購內容:**")
                                     try:
-                                        items = json.loads(row['Items_Json'])
+                                        items = row['Items_Json']
+                                        if isinstance(items, str):
+                                            items = json.loads(items)
                                         for item in items.values():
                                             st.text(f"• {item['name']} ({item['spec']}) x{item['qty']}")
                                     except: st.error("JSON 解析失敗")
@@ -725,7 +690,9 @@ def main_app(user):
                                     st.markdown(f"### Total: ${row['Total']}")
                                     
                                     if st.button("✏️ 修改內容 (進入購物車)", key=f"admin_edit_{row['Order_ID']}", type="primary"):
-                                        st.session_state.cart = json.loads(row['Items_Json'])
+                                        items_to_cart = row['Items_Json']
+                                        if isinstance(items_to_cart, str): items_to_cart = json.loads(items_to_cart)
+                                        st.session_state.cart = items_to_cart
                                         st.session_state.editing_order_id = row['Order_ID']
                                         st.session_state.editing_customer_info = {
                                             "Customer_Name": row['Customer_Name'], 
@@ -761,8 +728,8 @@ def main_app(user):
                                         new_payment = st.selectbox("金流狀態", ["未付款", "已付款"], index=default_pay_idx, key=pay_key)
 
                                     ic1, ic2, ic3 = st.columns([2, 3, 1.5], vertical_alignment="bottom")
-                                    new_track = ic1.text_input("物流單號", value=str(row['Tracking_Number']) if pd.notna(row['Tracking_Number']) else "", key=track_key)
-                                    new_note = ic2.text_area("備註 (買家可見)", value=str(row['Admin_Note']) if pd.notna(row['Admin_Note']) else "", key=note_key, height=100)
+                                    new_track = ic1.text_input("物流單號", value=str(row.get('Tracking_Number', '')).replace('None',''), key=track_key)
+                                    new_note = ic2.text_area("備註 (買家可見)", value=str(row.get('Admin_Note', '')).replace('None',''), key=note_key, height=100)
                                     new_discount = ic3.number_input("額外折扣/調整 (+扣款, -加價)", value=int(row.get('Extra_Discount', 0)), key=disc_key)
                                     
                                     act_c1, act_c2 = st.columns([3, 1])
@@ -776,50 +743,36 @@ def main_app(user):
                                             final_status_list = [new_logistics, new_payment]
                                             if new_logistics == "已完成" and new_payment == "未付款":
                                                 st.warning("提醒：您將訂單設為「已完成」但「未付款」")
-                                            
                                             final_status_str = ", ".join(final_status_list)
     
-                                            df_curr = get_data("Orders")
+                                            org_sub = int(pd.to_numeric(row.get('Subtotal', 0), errors='coerce'))
+                                            org_tax = int(pd.to_numeric(row.get('Tax', 0), errors='coerce'))
+                                            org_ship = int(pd.to_numeric(row.get('Shipping', 0), errors='coerce'))
+                                            new_total = org_sub + org_tax + org_ship - int(new_discount)
                                             
-                                            for col in ['Tracking_Number', 'Admin_Note', 'Status', 'Order_ID']:
-                                                if col not in df_curr.columns:
-                                                    df_curr[col] = ""
-                                                df_curr[col] = df_curr[col].astype(str).replace('nan', '')
-                                                
-                                            df_curr['Extra_Discount'] = pd.to_numeric(df_curr.get('Extra_Discount', 0), errors='coerce').fillna(0).astype(int)
-                                            df_curr['Subtotal'] = pd.to_numeric(df_curr.get('Subtotal', 0), errors='coerce').fillna(0).astype(int)
-                                            df_curr['Tax'] = pd.to_numeric(df_curr.get('Tax', 0), errors='coerce').fillna(0).astype(int)
-                                            df_curr['Shipping'] = pd.to_numeric(df_curr.get('Shipping', 0), errors='coerce').fillna(0).astype(int)
-
-                                            t_idx = df_curr[df_curr['Order_ID'] == row['Order_ID']].index
-                                            if not t_idx.empty:
-                                                idx = t_idx[0]
-                                                df_curr.at[idx, 'Status'] = final_status_str
-                                                df_curr.at[idx, 'Tracking_Number'] = str(new_track)
-                                                df_curr.at[idx, 'Admin_Note'] = str(new_note)
-                                                df_curr.at[idx, 'Extra_Discount'] = int(new_discount)
-                                                
-                                                org_sub = df_curr.at[idx, 'Subtotal']
-                                                org_tax = df_curr.at[idx, 'Tax']
-                                                org_ship = df_curr.at[idx, 'Shipping']
-                                                new_total = org_sub + org_tax + org_ship - int(new_discount)
-                                                df_curr.at[idx, 'Total'] = new_total
-                                                
-                                                update_data("Orders", df_curr)
+                                            update_dict = {
+                                                'Status': final_status_str,
+                                                'Tracking_Number': str(new_track),
+                                                'Admin_Note': str(new_note),
+                                                'Extra_Discount': int(new_discount),
+                                                'Total': new_total
+                                            }
+                                            
+                                            if update_data_by_id("orders", "Order_ID", row['Order_ID'], update_dict):
                                                 st.success(f"訂單已更新！狀態：[{final_status_str}]")
-                                                
                                                 o_data = {
                                                     "Order_ID": row['Order_ID'], "Customer_Name": row['Customer_Name'],
                                                     "Email": row['Email'], "Status": final_status_str,
                                                     "Total": new_total, "Tracking_Number": new_track, "Admin_Note": new_note,
                                                     "Extra_Discount": new_discount
                                                 }
-                                                c_items = json.loads(row['Items_Json'])
+                                                
+                                                c_items = row['Items_Json']
+                                                if isinstance(c_items, str): c_items = json.loads(c_items)
                                                 
                                                 with st.spinner("正在寄送通知信..."):
                                                     send_order_email(o_data, c_items, is_update=True)
                                                     st.toast("信件已寄出！", icon="📧")
-                                                
                                                 time.sleep(1)
                                                 st.rerun()
                                         except Exception as e:
@@ -827,119 +780,120 @@ def main_app(user):
                                             
                                     if btn_delete:
                                         try:
-                                            df_curr = get_data("Orders")
-                                            df_curr = df_curr[df_curr['Order_ID'] != row['Order_ID']]
-                                            update_data("Orders", df_curr)
-                                            log_system_event(user, "Delete Order", f"Deleted Order ID: {row['Order_ID']}")
-                                            st.success(f"訂單 {row['Order_ID']} 已成功刪除！")
-                                            time.sleep(1)
-                                            st.rerun()
+                                            if delete_data_by_id("orders", "Order_ID", row['Order_ID']):
+                                                log_system_event(user, "Delete Order", f"Deleted Order ID: {row['Order_ID']}")
+                                                st.success(f"訂單 {row['Order_ID']} 已成功刪除！")
+                                                time.sleep(1)
+                                                st.rerun()
                                         except Exception as e:
                                             st.error(f"刪除失敗: {e}")
 
-                    else: st.info("目前無任何訂單")
                 except Exception as e: st.error(f"讀取失敗: {e}")
 
         with tab2:
             st.subheader("設定各品牌門檻與折扣")
             st.info("💡 Wholesale_Threshold: 批發門檻 | Shipping_Threshold: 免運門檻 | Discount: 零售折扣")
             _, df_rules = get_brand_rules()
-            edited_df = st.data_editor(
-                df_rules, num_rows="dynamic",
-                column_config={
-                    "Brand": st.column_config.TextColumn("品牌", required=True),
-                    "Wholesale_Threshold": st.column_config.NumberColumn("批發門檻", min_value=0, format="$%d"),
-                    "Shipping_Threshold": st.column_config.NumberColumn("免運門檻", min_value=0, format="$%d"),
-                    "Discount": st.column_config.NumberColumn("折扣 (0.1~1.0)", min_value=0.1, max_value=1.0, step=0.05)
-                }, width="stretch", key="brand_rules_editor"
-            )
-            if st.button("💾 儲存設定", type="primary"):
-                try:
-                    update_data("BrandRules", edited_df)
-                    st.success("設定已更新！")
-                    get_brand_rules.clear()
-                    time.sleep(1)
-                    st.rerun()
-                except Exception as e: st.error(f"儲存失敗: {e}")
+            if not df_rules.empty:
+                edited_df = st.data_editor(
+                    df_rules, num_rows="dynamic",
+                    column_config={
+                        "Brand": st.column_config.TextColumn("品牌", required=True),
+                        "Wholesale_Threshold": st.column_config.NumberColumn("批發門檻", min_value=0, format="$%d"),
+                        "Shipping_Threshold": st.column_config.NumberColumn("免運門檻", min_value=0, format="$%d"),
+                        "Discount": st.column_config.NumberColumn("折扣 (0.1~1.0)", min_value=0.1, max_value=1.0, step=0.05)
+                    }, width="stretch", key="brand_rules_editor"
+                )
+                if st.button("💾 儲存設定", type="primary"):
+                    try:
+                        supabase.table("brandrules").delete().neq("Brand", "THIS_WILL_NEVER_MATCH").execute()
+                        records = edited_df.to_dict(orient='records')
+                        if records:
+                            for r in records:
+                                r.pop('id', None)
+                                r.pop('created_at', None)
+                            supabase.table("brandrules").insert(records).execute()
+                        st.success("設定已更新！")
+                        get_brand_rules.clear()
+                        time.sleep(1)
+                        st.rerun()
+                    except Exception as e: st.error(f"儲存失敗: {e}")
+            else:
+                st.warning("目前 BrandRules 資料表為空。")
         
         with tab3:
             st.subheader("👥 用戶權限管理")
-            
             try:
                 all_brands_list = sorted(get_products_data()['Brand'].dropna().unique().tolist())
             except:
                 all_brands_list = []
 
             try:
-                users_df = get_data("Users", ttl=5) 
-                
-                required_cols = ['Username', 'Dealer_Name']
-                missing_cols = [c for c in required_cols if c not in users_df.columns]
-                
-                if missing_cols:
-                    st.error(f"❌ Google Sheet 資料表缺少欄位: {missing_cols}")
-                    st.write("目前讀取到的欄位:", users_df.columns.tolist())
-                    st.info("請檢查 Google Sheets 'Users' 分頁的第一列標題。")
+                users_df = get_data("users") 
+                if users_df.empty:
+                    st.warning("目前 Users 資料表為空。")
                 else:
-                    if 'Allowed_Brands' not in users_df.columns: users_df['Allowed_Brands'] = ""
-                    if 'Contact_Email' not in users_df.columns: users_df['Contact_Email'] = ""
+                    required_cols = ['Username', 'Dealer_Name']
+                    missing_cols = [c for c in required_cols if c not in users_df.columns]
                     
-                    users_df['Allowed_Brands'] = users_df['Allowed_Brands'].astype(str).replace('nan', '')
-                    users_df['Contact_Email'] = users_df['Contact_Email'].astype(str).replace('nan', '')
+                    if missing_cols:
+                        st.error(f"❌ 資料表缺少必要欄位: {missing_cols}")
+                    else:
+                        if 'Allowed_Brands' not in users_df.columns: users_df['Allowed_Brands'] = ""
+                        if 'Contact_Email' not in users_df.columns: users_df['Contact_Email'] = ""
+                        
+                        users_df['Allowed_Brands'] = users_df['Allowed_Brands'].astype(str).replace('nan', '')
+                        users_df['Contact_Email'] = users_df['Contact_Email'].astype(str).replace('nan', '')
 
-                    st.markdown("##### 目前權限總覽")
-                    st.dataframe(
-                        users_df[['Username', 'Dealer_Name', 'Contact_Email', 'Allowed_Brands']], 
-                        width="stretch", 
-                        hide_index=True
-                    )
-                    
-                    st.divider()
-                    st.markdown("##### ✏️ 修改權限")
-                    
-                    c_edit_1, c_edit_2 = st.columns([1, 2])
-                    
-                    with c_edit_1:
-                        target_user = st.selectbox("選擇要修改的用戶", users_df['Username'].unique())
-                        current_row = users_df[users_df['Username'] == target_user].iloc[0]
-                        admin_edit_email = st.text_input("聯絡 Email", value=str(current_row['Contact_Email']))
+                        st.markdown("##### 目前權限總覽")
+                        st.dataframe(
+                            users_df[['Username', 'Dealer_Name', 'Contact_Email', 'Allowed_Brands']], 
+                            width="stretch", 
+                            hide_index=True
+                        )
+                        
+                        st.divider()
+                        st.markdown("##### ✏️ 修改權限")
+                        
+                        c_edit_1, c_edit_2 = st.columns([1, 2])
+                        
+                        with c_edit_1:
+                            target_user = st.selectbox("選擇要修改的用戶", users_df['Username'].unique())
+                            current_row = users_df[users_df['Username'] == target_user].iloc[0]
+                            admin_edit_email = st.text_input("聯絡 Email", value=str(current_row['Contact_Email']))
 
-                    with c_edit_2:
-                        current_setting = str(current_row['Allowed_Brands'])
-                        is_all = (current_setting == "" or "all" in current_setting.lower())
-                        default_selected = []
-                        if not is_all:
-                            saved_list = [x.strip() for x in current_setting.split(',')]
-                            default_selected = [x for x in saved_list if x in all_brands_list]
+                        with c_edit_2:
+                            current_setting = str(current_row['Allowed_Brands'])
+                            is_all = (current_setting == "" or "all" in current_setting.lower())
+                            default_selected = []
+                            if not is_all:
+                                saved_list = [x.strip() for x in current_setting.split(',')]
+                                default_selected = [x for x in saved_list if x in all_brands_list]
 
-                        allow_all = st.checkbox("✅ 開放所有品牌權限 (All)", value=is_all)
-                        if not allow_all:
-                            selected_brands = st.multiselect(
-                                "請勾選允許的品牌：", 
-                                options=all_brands_list,
-                                default=default_selected
-                            )
-                        else:
-                            st.info("ℹ️ 已選擇開放所有品牌，下方選單無須選擇。")
-                            selected_brands = []
-
-                    if st.button("💾 更新該用戶設定", type="primary"):
-                        try:
-                            if allow_all:
-                                final_str = "All"
+                            allow_all = st.checkbox("✅ 開放所有品牌權限 (All)", value=is_all)
+                            if not allow_all:
+                                selected_brands = st.multiselect(
+                                    "請勾選允許的品牌：", 
+                                    options=all_brands_list,
+                                    default=default_selected
+                                )
                             else:
-                                final_str = ", ".join(selected_brands)
-                            
-                            idx = users_df[users_df['Username'] == target_user].index[0]
-                            users_df.at[idx, 'Allowed_Brands'] = final_str
-                            users_df.at[idx, 'Contact_Email'] = admin_edit_email 
-                            
-                            update_data("Users", users_df)
-                            st.success(f"✅ 用戶 {target_user} 資料已更新！")
-                            time.sleep(1)
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"更新失敗: {e}")
+                                st.info("ℹ️ 已選擇開放所有品牌，下方選單無須選擇。")
+                                selected_brands = []
+
+                        if st.button("💾 更新該用戶設定", type="primary"):
+                            try:
+                                final_str = "All" if allow_all else ", ".join(selected_brands)
+                                update_dict = {
+                                    'Allowed_Brands': final_str,
+                                    'Contact_Email': admin_edit_email
+                                }
+                                if update_data_by_id("users", "Username", target_user, update_dict):
+                                    st.success(f"✅ 用戶 {target_user} 資料已更新！")
+                                    time.sleep(1)
+                                    st.rerun()
+                            except Exception as e:
+                                st.error(f"更新失敗: {e}")
 
             except Exception as e:
                 st.error(f"讀取用戶資料失敗: {e}")
@@ -949,11 +903,10 @@ def main_app(user):
             st.info("💡 這裡展示即時的銷售數據分析，協助您判斷通路價值與熱銷商品。")
             
             try:
-                orders = get_data("Orders")
+                orders = get_data("orders")
                 if orders.empty:
                     st.warning("目前沒有訂單數據可供分析。")
                 else:
-                    # 1. 資料前處理
                     orders['Order_Date'] = pd.to_datetime(orders['Order_Time'])
                     orders['Month'] = orders['Order_Date'].dt.strftime('%Y-%m')
                     orders['Total'] = pd.to_numeric(orders['Total'], errors='coerce').fillna(0)
@@ -966,7 +919,8 @@ def main_app(user):
                     all_items_list = []
                     for _, row in orders.iterrows():
                         try:
-                            items = json.loads(row['Items_Json'])
+                            items = row['Items_Json']
+                            if isinstance(items, str): items = json.loads(items)
                             for item in items.values():
                                 c_cat = item.get('category', prod_cat_map.get(item.get('name'), 'Unknown'))
                                 all_items_list.append({
@@ -1078,19 +1032,18 @@ def main_app(user):
         with tab5:
             st.subheader("📢 置頂公告設定")
             try:
-                announcement_df = get_data("Announcements")
-                if announcement_df.empty or 'Message' not in announcement_df.columns:
-                    announcement_df = pd.DataFrame([{"Message": "歡迎使用 Bluebulous B2B 採購系統！"}])
-                
-                current_msg = announcement_df.iloc[0]['Message'] if not announcement_df.empty else ""
+                announcement_df = get_data("announcements")
+                current_msg = ""
+                if not announcement_df.empty and 'Message' in announcement_df.columns:
+                    msgs = announcement_df['Message'].dropna().tolist()
+                    if msgs: current_msg = str(msgs[-1])
                 
                 new_msg = st.text_area("公告內容 (支援 Emoji)", value=current_msg, height=100)
                 
                 if st.button("💾 更新公告", type="primary"):
-                    announcement_df = pd.DataFrame([{"Message": new_msg}])
-                    update_data("Announcements", announcement_df)
+                    insert_data("announcements", {"Message": new_msg})
                     st.success("公告已更新！請重新整理頁面查看效果。")
-                    get_announcement.clear() # 清除快取
+                    get_announcement.clear()
             except Exception as e:
                 st.error(f"讀取公告失敗: {e}")
 
@@ -1103,14 +1056,11 @@ def main_app(user):
                 st.rerun()
 
             try:
-                logs = get_data("SystemLogs")
+                logs = get_data("systemlogs")
                 if logs.empty:
                     st.warning("目前尚無日誌紀錄")
                 else:
-                    # 排序：最新的在上面
                     logs = logs.sort_values("Time", ascending=False)
-                    
-                    # 簡易篩選器
                     filter_user = st.multiselect("篩選經銷商", logs['Dealer'].unique())
                     if filter_user:
                         logs = logs[logs['Dealer'].isin(filter_user)]
@@ -1327,7 +1277,7 @@ def main_app(user):
                     default_discount = int(st.session_state.get('editing_customer_info', {}).get('Extra_Discount', 0))
 
                 extra_discount = 0
-                if user['Username'] in ADMIN_USERS:
+                if user.get('Username') in ADMIN_USERS:
                     st.markdown("---")
                     extra_discount = st.number_input(
                         "🔧 管理員：總價手動調整 (+輸入折扣扣除, -輸入額外加價)", 
@@ -1366,7 +1316,7 @@ def main_app(user):
                 else: 
                     st.markdown("---")
                     default_checkout_email = str(user.get('Contact_Email', '')).replace('nan', '')
-                    if not default_checkout_email and "@" in str(user['Username']):
+                    if not default_checkout_email and "@" in str(user.get('Username', '')):
                         default_checkout_email = user['Username']
                     
                     contact_email_input = st.text_input("📧 接收訂單通知 Email (必填)", value=default_checkout_email, help="訂單確認信將寄送至此信箱")
@@ -1378,82 +1328,80 @@ def main_app(user):
                     if is_editing:
                         order_id = st.session_state.editing_order_id
                         saved_info = st.session_state.get('editing_customer_info', {})
-                        c_name = saved_info.get('Customer_Name', user['Dealer_Name'])
-                        c_email = saved_info.get('Email', user['Username']) 
-                        c_phone = saved_info.get('Phone', user['Phone'])
+                        c_name = saved_info.get('Customer_Name', user.get('Dealer_Name', 'Unknown'))
+                        c_email = saved_info.get('Email', user.get('Username', 'Unknown')) 
+                        c_phone = saved_info.get('Phone', user.get('Phone', 'Unknown'))
                         c_status = "賣方已修改"
                     else:
                         order_id = f"ORD-{datetime.now().strftime('%Y%m%d%H%M%S')}"
-                        c_name = user['Dealer_Name']
+                        c_name = user.get('Dealer_Name', 'Unknown')
                         c_email = contact_email_input 
-                        c_phone = user['Phone']
+                        c_phone = user.get('Phone', 'Unknown')
                         c_status = "待處理"
                         
                         try:
                             if c_email != str(user.get('Contact_Email', '')):
-                                users_d = get_data("Users")
-                                u_idx = users_d[users_d['Username'] == user['Username']].index
-                                if not u_idx.empty:
-                                    users_d.at[u_idx[0], 'Contact_Email'] = c_email
-                                    update_data("Users", users_d)
+                                if update_data_by_id("users", "Username", user['Username'], {"Contact_Email": c_email}):
                                     st.session_state['user']['Contact_Email'] = c_email
                         except: pass 
 
                     final_cart_data = st.session_state.cart.copy()
+                    
                     order_data = {
-                        "Order_ID": order_id, "Order_Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        "Customer_Name": c_name, "Email": c_email, "Phone": c_phone,
-                        "Items_Json": json.dumps(final_cart_data, ensure_ascii=False),
-                        "Subtotal": grand_total_subtotal, "Tax": grand_total_tax, 
-                        "Shipping": shipping, "Total": grand_total, "Status": c_status,
-                        "Extra_Discount": extra_discount 
+                        "Order_ID": order_id, 
+                        "Order_Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "Customer_Name": c_name, 
+                        "Email": c_email, 
+                        "Phone": c_phone,
+                        "Items_Json": final_cart_data, 
+                        "Subtotal": grand_total_subtotal, 
+                        "Tax": grand_total_tax, 
+                        "Shipping": shipping, 
+                        "Total": grand_total, 
+                        "Status": c_status,
+                        "Extra_Discount": extra_discount,
+                        "Tracking_Number": "",
+                        "Admin_Note": ""
                     }
-                    if 'Tracking_Number' not in order_data: order_data['Tracking_Number'] = ""
-                    if 'Admin_Note' not in order_data: order_data['Admin_Note'] = ""
 
                     try:
-                        old_orders = get_data("Orders")
-                        
-                        for col in ['Tracking_Number', 'Admin_Note', 'Status', 'Order_ID']:
-                            if col not in old_orders.columns:
-                                old_orders[col] = ""
-                            old_orders[col] = old_orders[col].astype(str).replace('nan', '')
-                        
-                        for col in ['Extra_Discount', 'Subtotal', 'Tax', 'Shipping', 'Total']:
-                            if col in old_orders.columns:
-                                old_orders[col] = pd.to_numeric(old_orders[col], errors='coerce').fillna(0).astype(int)
-
                         if is_editing:
-                            target_idx = old_orders[old_orders['Order_ID'] == order_id].index
-                            if not target_idx.empty:
-                                idx = target_idx[0]
-                                for key, value in order_data.items():
-                                    old_orders.at[idx, key] = value
-                                    
+                            update_dict = {
+                                "Customer_Name": c_name,
+                                "Email": c_email,
+                                "Phone": c_phone,
+                                "Items_Json": final_cart_data,
+                                "Subtotal": grand_total_subtotal,
+                                "Tax": grand_total_tax,
+                                "Shipping": shipping,
+                                "Total": grand_total,
+                                "Status": c_status,
+                                "Extra_Discount": extra_discount
+                            }
+                            if update_data_by_id("orders", "Order_ID", order_id, update_dict):
                                 log_system_event(user, "Admin Edit Checkout", f"Order ID: {order_id}")
-                                update_data("Orders", old_orders)
                                 st.success(f"訂單 {order_id} 修改完成！")
                                 with st.spinner("正在寄送通知信給客戶..."):
                                     if send_order_email(order_data, final_cart_data, is_update=True):
                                         st.toast("📧 確認信已寄出！", icon="✅")
                                     else: st.error("信件寄送失敗")
-                            else: st.error("找不到原始訂單")
+                            else: st.error("更新訂單至資料庫失敗")
                         else:
-                            updated = pd.concat([old_orders, pd.DataFrame([order_data])], ignore_index=True)
-                            update_data("Orders", updated)
-                            log_system_event(user, "Checkout", f"Order ID: {order_id}")
-                            st.success(f"訂單 {order_id} 已送出!")
-                            with st.spinner("正在寄送確認信..."):
-                                if send_order_email(order_data, final_cart_data):
-                                    st.toast("📧 確認信已寄出！", icon="✅")
-                                else: st.warning("訂單已成立，但信件寄送失敗")
+                            if insert_data("orders", order_data):
+                                log_system_event(user, "Checkout", f"Order ID: {order_id}")
+                                st.success(f"訂單 {order_id} 已送出!")
+                                with st.spinner("正在寄送確認信..."):
+                                    if send_order_email(order_data, final_cart_data):
+                                        st.toast("📧 確認信已寄出！", icon="✅")
+                                    else: st.warning("訂單已成立，但信件寄送失敗")
+                            else: st.error("新增訂單至資料庫失敗")
 
                         st.session_state.cart = {}
                         st.session_state.editing_order_id = None
                         st.session_state.editing_customer_info = None
                         st.session_state.has_logged_cart_start = False 
                         time.sleep(1)
-                        if user['Username'] in ADMIN_USERS: st.session_state.page = 'admin_orders'
+                        if user.get('Username') in ADMIN_USERS: st.session_state.page = 'admin_orders'
                         else: st.session_state.page = 'shop'
                         st.rerun()
                     except Exception as e: st.error(f"訂單處理失敗: {e}")
@@ -1470,16 +1418,21 @@ def login_page():
             p = st.text_input("Password", type="password")
             if st.form_submit_button("Login", width="stretch", type="primary"):
                 with st.spinner("正在連線驗證中..."):
-                    users = get_data("Users")
+                    users = get_data("users")
                     
-                    # --- [新增] 防呆機制：檢查資料表是否成功讀取 ---
-                    if users.empty or 'Username' not in users.columns:
-                        st.error("⚠️ 系統連線擁斷 (Google API 暫時限流)，請等待 3~5 分鐘後再試！")
+                    if users.empty:
+                        if u == "admin" and p == "admin":
+                            st.session_state['user'] = {"Username": "admin", "Dealer_Name": "System Admin", "Password": "admin"}
+                            st.rerun()
+                        else:
+                            st.error("系統資料庫目前為空。若您是管理員，請使用預設帳密 (admin/admin) 登入以建立資料。")
+                    elif 'Username' not in users.columns:
+                        st.error("⚠️ 資料表結構錯誤：找不到 Username 欄位。")
                     else:
                         match = users[users['Username'] == u]
                         if not match.empty and str(match.iloc[0]['Password']) == p:
-                            st.session_state['user'] = match.iloc[0]
-                            log_system_event(match.iloc[0], "Login", "User logged in")
+                            st.session_state['user'] = match.iloc[0].to_dict()
+                            log_system_event(match.iloc[0].to_dict(), "Login", "User logged in")
                             st.rerun()
                         else: 
                             st.error("帳號或密碼錯誤")
