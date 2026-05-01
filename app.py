@@ -4,6 +4,7 @@ import altair as alt
 from datetime import datetime
 import json
 import time
+import os
 from supabase import create_client, Client
 
 # Email 相關模組
@@ -18,9 +19,14 @@ st.set_page_config(
     page_icon="https://raw.githubusercontent.com/Bluebulous/product-images/main/Bluebulous%20logo.jpg"
 )
 
-# --- Supabase 連線設定 ---
-SUPABASE_URL = "https://thfvtscpmssozaqiitgq.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRoZnZ0c2NwbXNzb3phcWlpdGdxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc2MDQ3NjEsImV4cCI6MjA5MzE4MDc2MX0.0fbvFu6FCH0c1UUkHx3wCJFvzx2Uu9eHqaTUyAD8t0U"
+# --- 🔒 Supabase 連線設定 (安全升級版) ---
+# 系統會優先去 Render 的環境變數找，如果在本地端測試則去找 st.secrets
+try:
+    SUPABASE_URL = os.environ.get("SUPABASE_URL") or st.secrets["SUPABASE_URL"]
+    SUPABASE_KEY = os.environ.get("SUPABASE_KEY") or st.secrets["SUPABASE_KEY"]
+except KeyError:
+    st.error("⚠️ 系統找不到 Supabase 金鑰！請確定已在 Render 設定 Environment Variables。")
+    st.stop()
 
 @st.cache_resource
 def init_connection():
@@ -222,7 +228,7 @@ def get_products_data():
     try:
         response = supabase.table("products").select("*").execute()
         df = pd.DataFrame(response.data)
-        df = format_df_cols(df) # 經過翻譯機
+        df = format_df_cols(df) 
         if not df.empty:
             for col in ['Size', 'Name', 'Color', 'Category', 'Brand']:
                 if col in df.columns:
@@ -237,7 +243,7 @@ def get_brand_rules():
     try:
         response = supabase.table("brandrules").select("*").execute()
         df = pd.DataFrame(response.data)
-        df = format_df_cols(df) # 經過翻譯機
+        df = format_df_cols(df)
         rules = {}
         if not df.empty:
             for _, row in df.iterrows():
@@ -255,14 +261,14 @@ def get_data(table_name):
     try:
         response = supabase.table(table_name).select("*").execute()
         df = pd.DataFrame(response.data)
-        return format_df_cols(df) # 經過翻譯機
+        return format_df_cols(df)
     except Exception as e:
         print(f"Read {table_name} error: {e}")
         return pd.DataFrame()
 
 def insert_data(table_name, data_dict):
     try:
-        lower_dict = {k.lower(): v for k, v in data_dict.items()} # 轉成全小寫寫入
+        lower_dict = {k.lower(): v for k, v in data_dict.items()} 
         supabase.table(table_name).insert(lower_dict).execute()
         return True
     except Exception as e:
@@ -271,7 +277,7 @@ def insert_data(table_name, data_dict):
 
 def update_data_by_id(table_name, match_col, match_val, update_dict):
     try:
-        lower_dict = {k.lower(): v for k, v in update_dict.items()} # 轉成全小寫寫入
+        lower_dict = {k.lower(): v for k, v in update_dict.items()}
         supabase.table(table_name).update(lower_dict).eq(match_col.lower(), match_val).execute()
         return True
     except Exception as e:
@@ -348,7 +354,13 @@ def send_order_email(order_data, cart_items, is_update=False):
     SMTP_SERVER = "smtp.gmail.com"
     SMTP_PORT = 587
     SENDER_EMAIL = "bluebulous.official@gmail.com"
-    SENDER_PASSWORD = "mjzm yfwj nbxz nefj"
+    
+    # --- 🔒 Gmail 寄信密碼 (安全升級版) ---
+    try:
+        SENDER_PASSWORD = os.environ.get("SMTP_PASSWORD") or st.secrets["SMTP_PASSWORD"]
+    except KeyError:
+        print("Error: SMTP_PASSWORD 尚未設定")
+        return False
 
     msg = MIMEMultipart()
     msg['From'] = SENDER_EMAIL
@@ -413,7 +425,7 @@ def send_order_email(order_data, cart_items, is_update=False):
                     </tbody>
                 </table>
                 <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;">
-                <p style="font-size: 12px; color: #999;">此信件為系統自動發送，請勿直接回信。<br>如有疑問請聯繫客服。</p>
+                <p style="font-size: 12px; color: #999;">此信件為系统自動發送，請勿直接回信。<br>如有疑問請聯繫客服。</p>
             </div>
         </body>
     </html>
@@ -553,7 +565,11 @@ def main_app(user):
                     if 'Extra_Discount' not in orders.columns: orders['Extra_Discount'] = 0 
                     orders['Extra_Discount'] = pd.to_numeric(orders['Extra_Discount'], errors='coerce').fillna(0).astype(int)
 
-                    my_orders = orders[orders['Email'] == user['Username']].sort_values("Order_Time", ascending=False)
+                    # --- 🔧 升級版比對邏輯：同時比對 Email 與 公司名稱，並清除多餘空白 ---
+                    match_email = orders['Email'].astype(str).str.strip() == str(user.get('Username', '')).strip()
+                    match_dealer = orders['Customer_Name'].astype(str).str.strip() == str(user.get('Dealer_Name', '')).strip()
+                    
+                    my_orders = orders[match_email | match_dealer].sort_values("Order_Time", ascending=False)
                     
                     if not my_orders.empty:
                         for index, row in my_orders.iterrows():
