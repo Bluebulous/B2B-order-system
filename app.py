@@ -158,7 +158,7 @@ st.markdown(
     /* === 🛒 購物車專用微調 === */
     /* 1. 強制讓 Number Input 顯示為固定寬度 (120px) */
     div[data-testid="stVerticalBlockBorderWrapper"] div[data-testid="stNumberInput"] {
-        width: 120px !important; 
+        max-width: 140px !important;
         min-width: 120px !important;
     }
     
@@ -205,7 +205,6 @@ def get_products_data():
         try:
             df = conn.read(spreadsheet=SHEET_URL, worksheet="Products")
             df.columns = df.columns.str.strip()
-            # 資料清洗
             if 'Size' in df.columns:
                 df['Size'] = df['Size'].astype(str).str.strip()
             if 'Name' in df.columns:
@@ -480,7 +479,7 @@ def main_app(user):
     if df_products.empty:
         st.warning("⚠️ 目前沒有您有權限查看的產品，請聯繫管理員。")
         with st.sidebar:
-            if st.button("登出", key="logout_empty", use_container_width=True):
+            if st.button("登出", key="logout_empty", width="stretch"):
                 st.session_state.clear()
                 st.rerun()
         return
@@ -492,7 +491,7 @@ def main_app(user):
 
     with st.sidebar:
         logo_url = "https://raw.githubusercontent.com/Bluebulous/product-images/main/LOGO-white-01.png"
-        st.image(logo_url, use_container_width=True)
+        st.image(logo_url, width="stretch")
         st.markdown("<h3 style='text-align: center; color: #ffffff; margin-top: -10px;'>B2B採購系統 (Beta版)</h3>", unsafe_allow_html=True)
         st.divider()
         st.markdown(f"### Hello, {user['Contact_Person']}")
@@ -502,36 +501,36 @@ def main_app(user):
         if st.session_state.cart:
             total_qty = sum(item['qty'] for item in st.session_state.cart.values())
             st.info(f"🛒 購物車內有 {total_qty} 件商品")
-            if st.button("前往結帳 (查看詳情)", type="primary", use_container_width=True):
+            if st.button("前往結帳 (查看詳情)", type="primary", width="stretch"):
                  st.toast("請往下滑動查看完整購物車", icon="👇")
         else:
             st.caption("🛒 購物車是空的")
             
         st.divider()
         
-        if st.button("🔄 重整產品資料", use_container_width=True):
+        if st.button("🔄 重整產品資料", width="stretch"):
             st.cache_data.clear()
             st.toast("資料已更新！正在重新載入...", icon="🔄")
             time.sleep(1)
             st.rerun()
 
-        if st.button("開始訂購", use_container_width=True):
+        if st.button("開始訂購", width="stretch"):
             st.session_state.page = 'shop'
             st.session_state.editing_order_id = None
             st.rerun()
-        if st.button("歷史訂單", use_container_width=True):
+        if st.button("歷史訂單", width="stretch"):
             st.session_state.page = 'history'
             st.rerun()
-        if st.button("個人資料", use_container_width=True):
+        if st.button("個人資料", width="stretch"):
             st.session_state.page = 'profile'
             st.rerun()
         if user['Username'] in ADMIN_USERS:
             st.markdown("---")
-            if st.button("🔧 管理員後台", use_container_width=True):
+            if st.button("🔧 管理員後台", width="stretch"):
                 st.session_state.page = 'admin_orders'
                 st.rerun()
         st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("登出", key="logout", use_container_width=True):
+        if st.button("登出", key="logout", width="stretch"):
             st.session_state.clear()
             st.rerun()
 
@@ -642,7 +641,7 @@ def main_app(user):
                 current_pwd = st.text_input("目前密碼", type="password")
                 new_pwd = st.text_input("新密碼", type="password")
                 confirm_pwd = st.text_input("確認新密碼", type="password")
-                if st.form_submit_button("更新密碼", type="primary", use_container_width=True):
+                if st.form_submit_button("更新密碼", type="primary", width="stretch"):
                     if str(current_pwd) != str(user['Password']):
                         st.error("❌ 目前密碼輸入錯誤")
                     elif new_pwd != confirm_pwd:
@@ -725,7 +724,6 @@ def main_app(user):
                                         st.markdown(f"<span style='color:{color}'>**調整:** {sign}${abs(extra_disc_show)}</span>", unsafe_allow_html=True)
                                     st.markdown(f"### Total: ${row['Total']}")
                                     
-                                    # [修改] 將原有的折扣一併打包進 session，讓購物車知道先前的調整金額
                                     if st.button("✏️ 修改內容 (進入購物車)", key=f"admin_edit_{row['Order_ID']}", type="primary"):
                                         st.session_state.cart = json.loads(row['Items_Json'])
                                         st.session_state.editing_order_id = row['Order_ID']
@@ -769,9 +767,9 @@ def main_app(user):
                                     
                                     act_c1, act_c2 = st.columns([3, 1])
                                     with act_c1:
-                                        btn_update = st.form_submit_button("💾 更新訂單並通知客戶", type="primary", use_container_width=True)
+                                        btn_update = st.form_submit_button("💾 更新訂單並通知客戶", type="primary", width="stretch")
                                     with act_c2:
-                                        btn_delete = st.form_submit_button("🗑️ 刪除訂單", use_container_width=True, help="注意：刪除後無法復原！")
+                                        btn_delete = st.form_submit_button("🗑️ 刪除訂單", width="stretch", help="注意：刪除後無法復原！")
 
                                     if btn_update:
                                         try:
@@ -853,7 +851,7 @@ def main_app(user):
                     "Wholesale_Threshold": st.column_config.NumberColumn("批發門檻", min_value=0, format="$%d"),
                     "Shipping_Threshold": st.column_config.NumberColumn("免運門檻", min_value=0, format="$%d"),
                     "Discount": st.column_config.NumberColumn("折扣 (0.1~1.0)", min_value=0.1, max_value=1.0, step=0.05)
-                }, use_container_width=True, key="brand_rules_editor"
+                }, width="stretch", key="brand_rules_editor"
             )
             if st.button("💾 儲存設定", type="primary"):
                 try:
@@ -892,7 +890,7 @@ def main_app(user):
                     st.markdown("##### 目前權限總覽")
                     st.dataframe(
                         users_df[['Username', 'Dealer_Name', 'Contact_Email', 'Allowed_Brands']], 
-                        use_container_width=True, 
+                        width="stretch", 
                         hide_index=True
                     )
                     
@@ -1033,7 +1031,7 @@ def main_app(user):
                             text_brand = base_brand.mark_text(size=12, fill="white", fontWeight="bold", radius=80).encode(text="Label:N")
                             
                             chart_brand = (pie_brand + text_brand).properties(height=350)
-                            st.altair_chart(chart_brand, use_container_width=True)
+                            st.altair_chart(chart_brand, width="stretch")
 
                         with c_chart4:
                             st.markdown("##### 📂 產品分類佔比 (Sales by Category)")
@@ -1053,7 +1051,7 @@ def main_app(user):
                             text_cat = base_cat.mark_text(size=12, fill="white", fontWeight="bold", radius=100).encode(text="Label:N")
                             
                             chart_cat = (pie_cat + text_cat).properties(height=350)
-                            st.altair_chart(chart_cat, use_container_width=True)
+                            st.altair_chart(chart_cat, width="stretch")
                     
                     st.divider()
                     
@@ -1067,7 +1065,7 @@ def main_app(user):
                                 "Subtotal": st.column_config.NumberColumn("銷售總額", format="$%d"),
                                 "Qty": st.column_config.NumberColumn("銷售數量"),
                             },
-                            use_container_width=True,
+                            width="stretch",
                             hide_index=True
                         )
                     else:
@@ -1119,7 +1117,7 @@ def main_app(user):
 
                     st.dataframe(
                         logs, 
-                        use_container_width=True,
+                        width="stretch",
                         hide_index=True,
                         column_config={
                             "Time": st.column_config.TextColumn("時間"),
@@ -1182,7 +1180,7 @@ def main_app(user):
                 with c3: st.markdown(f"<div style='color:#ff5500; font-weight:bold;'>${int(sku['Wholesale_Price'])}</div>", unsafe_allow_html=True)
                 with c4: st.markdown(f"<div style='color:#666;'>${int(sku['Retail_Price'])}</div>", unsafe_allow_html=True)
                 with c5:
-                    st.button("ADD", key=f"add_{sku['Product_ID']}_{selected_color}_{i}", type="primary", use_container_width=True,
+                    st.button("ADD", key=f"add_{sku['Product_ID']}_{selected_color}_{i}", type="primary", width="stretch",
                         on_click=add_to_cart_callback,
                         args=(sku['Product_ID'], current_name, f"{selected_color} / {str(sku['Size'])}", sku['Wholesale_Price'], sku['Retail_Price'], qty_key, current_product_data.iloc[0]['Brand'], current_product_data.iloc[0]['Category']))
 
@@ -1192,7 +1190,7 @@ def main_app(user):
             if img_row.empty: img_row = current_product_data.iloc[0]
             else: img_row = img_row.iloc[0]
             main_img = convert_drive_url(img_row['Image_URL'])
-            if main_img: st.image(main_img, use_container_width=True)
+            if main_img: st.image(main_img, width="stretch")
             else: st.warning("No Image")
             st.markdown("<br><h4>Related Products / 同系列商品</h4>", unsafe_allow_html=True)
             current_category = current_product_data.iloc[0]['Category']
@@ -1207,11 +1205,11 @@ def main_app(user):
                     with cols[idx]:
                         with st.container(border=True):
                             if thumb: 
-                                st.image(thumb, use_container_width=True)
+                                st.image(thumb, width="stretch")
                             else:
                                 st.markdown("<div style='height: 150px; background-color: #f0f0f0; display: flex; align-items: center; justify-content: center; color: #666;'>No Image</div>", unsafe_allow_html=True)
                             
-                            if st.button(f" {other_prod}", key=f"view_{other_prod}_{i}_{idx}", use_container_width=True):
+                            if st.button(f" {other_prod}", key=f"view_{other_prod}_{i}_{idx}", width="stretch"):
                                 st.session_state.current_product_name = other_prod
                                 st.rerun()
             if not others: st.caption("此分類下無其他商品")
@@ -1323,7 +1321,6 @@ def main_app(user):
                     shipping = SHIPPING_FEE
                     shipping_msg = f"運費 ${SHIPPING_FEE}"
 
-                # --- [新增] 管理員調整總價功能 ---
                 is_editing = st.session_state.get('editing_order_id') is not None
                 default_discount = 0
                 if is_editing:
@@ -1339,7 +1336,6 @@ def main_app(user):
                         key="cart_extra_discount", 
                         help="可以直接改變最後的結帳總金額"
                     )
-                # ---------------------------------
 
                 grand_total = grand_total_subtotal + grand_total_tax + shipping - extra_discount
                 
@@ -1351,13 +1347,11 @@ def main_app(user):
                 r1.text("運費 (Shipping)")
                 r2.text(shipping_msg)
                 
-                # --- [新增] 顯示調整金額 ---
                 if extra_discount != 0:
                     r1.markdown("**手動調整 (Adjustment)**")
                     sign = "-" if extra_discount > 0 else "+"
                     color = "green" if extra_discount > 0 else "red"
                     r2.markdown(f"<span style='color:{color}; font-weight:bold;'>{sign}${abs(extra_discount)}</span>", unsafe_allow_html=True)
-                # -------------------------
 
                 r1.markdown("#### 總計(含稅)")
                 r2.markdown(f"#### ${grand_total}")
@@ -1380,7 +1374,7 @@ def main_app(user):
 
                 disable_btn = (not is_editing) and (not contact_email_input)
                 
-                if st.button(btn_text, type="primary", use_container_width=True, disabled=disable_btn):
+                if st.button(btn_text, type="primary", width="stretch", disabled=disable_btn):
                     if is_editing:
                         order_id = st.session_state.editing_order_id
                         saved_info = st.session_state.get('editing_customer_info', {})
@@ -1412,7 +1406,7 @@ def main_app(user):
                         "Items_Json": json.dumps(final_cart_data, ensure_ascii=False),
                         "Subtotal": grand_total_subtotal, "Tax": grand_total_tax, 
                         "Shipping": shipping, "Total": grand_total, "Status": c_status,
-                        "Extra_Discount": extra_discount # [修改] 套用管理員在購物車內設定的金額
+                        "Extra_Discount": extra_discount 
                     }
                     if 'Tracking_Number' not in order_data: order_data['Tracking_Number'] = ""
                     if 'Admin_Note' not in order_data: order_data['Admin_Note'] = ""
@@ -1474,7 +1468,7 @@ def login_page():
         with st.form("login"):
             u = st.text_input("Username / Email")
             p = st.text_input("Password", type="password")
-            if st.form_submit_button("Login", use_container_width=True, type="primary"):
+            if st.form_submit_button("Login", width="stretch", type="primary"):
                 users = get_data("Users")
                 match = users[users['Username'] == u]
                 if not match.empty and str(match.iloc[0]['Password']) == p:
