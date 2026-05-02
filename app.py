@@ -425,7 +425,7 @@ def send_order_email(order_data, cart_items, is_update=False):
                     </tbody>
                 </table>
                 <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;">
-                <p style="font-size: 12px; color: #999;">此信件為系统自動發送，請勿直接回信。<br>如有疑問請聯繫客服。</p>
+                <p style="font-size: 12px; color: #999;">此信件為系統自動發送，請勿直接回信。<br>如有疑問請聯繫客服。</p>
             </div>
         </body>
     </html>
@@ -565,7 +565,6 @@ def main_app(user):
                     if 'Extra_Discount' not in orders.columns: orders['Extra_Discount'] = 0 
                     orders['Extra_Discount'] = pd.to_numeric(orders['Extra_Discount'], errors='coerce').fillna(0).astype(int)
 
-                    # --- 🔧 升級版比對邏輯：同時比對 Email 與 公司名稱，並清除多餘空白 ---
                     match_email = orders['Email'].astype(str).str.strip() == str(user.get('Username', '')).strip()
                     match_dealer = orders['Customer_Name'].astype(str).str.strip() == str(user.get('Dealer_Name', '')).strip()
                     
@@ -733,11 +732,13 @@ def main_app(user):
                                         if isinstance(items_to_cart, str): items_to_cart = json.loads(items_to_cart)
                                         st.session_state.cart = items_to_cart
                                         st.session_state.editing_order_id = row['Order_ID']
+                                        
+                                        # 🛡️ 濾網一：從後台抓取客戶資料時，強制過濾掉所有的 NaN，替換成安全的空字串
                                         st.session_state.editing_customer_info = {
-                                            "Customer_Name": row['Customer_Name'], 
-                                            "Email": row['Email'], 
-                                            "Phone": row['Phone'],
-                                            "Extra_Discount": int(row.get('Extra_Discount', 0))
+                                            "Customer_Name": str(row['Customer_Name']) if pd.notna(row['Customer_Name']) else "", 
+                                            "Email": str(row['Email']) if pd.notna(row['Email']) else "", 
+                                            "Phone": str(row['Phone']) if pd.notna(row['Phone']) else "",
+                                            "Extra_Discount": int(row.get('Extra_Discount', 0)) if pd.notna(row.get('Extra_Discount', 0)) else 0
                                         }
                                         st.session_state.page = 'shop'
                                         st.rerun()
@@ -767,8 +768,8 @@ def main_app(user):
                                         new_payment = st.selectbox("金流狀態", ["未付款", "已付款"], index=default_pay_idx, key=pay_key)
 
                                     ic1, ic2, ic3 = st.columns([2, 3, 1.5], vertical_alignment="bottom")
-                                    new_track = ic1.text_input("物流單號", value=str(row.get('Tracking_Number', '')).replace('None',''), key=track_key)
-                                    new_note = ic2.text_area("備註 (買家可見)", value=str(row.get('Admin_Note', '')).replace('None',''), key=note_key, height=100)
+                                    new_track = ic1.text_input("物流單號", value=str(row.get('Tracking_Number', '')).replace('nan','').replace('None',''), key=track_key)
+                                    new_note = ic2.text_area("備註 (買家可見)", value=str(row.get('Admin_Note', '')).replace('nan','').replace('None',''), key=note_key, height=100)
                                     new_discount = ic3.number_input("額外折扣/調整 (+扣款, -加價)", value=int(row.get('Extra_Discount', 0)), key=disc_key)
                                     
                                     act_c1, act_c2 = st.columns([3, 1])
@@ -900,11 +901,11 @@ def main_app(user):
                         with c_edit_1:
                             target_user = st.selectbox("選擇要修改的用戶", users_df['Username'].unique())
                             current_row = users_df[users_df['Username'] == target_user].iloc[0]
-                            admin_edit_email = st.text_input("聯絡 Email", value=str(current_row['Contact_Email']))
+                            admin_edit_email = st.text_input("聯絡 Email", value=str(current_row['Contact_Email']).replace('nan',''))
 
                         with c_edit_2:
                             current_setting = str(current_row['Allowed_Brands'])
-                            is_all = (current_setting == "" or "all" in current_setting.lower())
+                            is_all = (current_setting == "" or "all" in current_setting.lower() or current_setting == "nan")
                             default_selected = []
                             if not is_all:
                                 saved_list = [x.strip() for x in current_setting.split(',')]
@@ -1368,15 +1369,27 @@ def main_app(user):
                     if is_editing:
                         order_id = st.session_state.editing_order_id
                         saved_info = st.session_state.get('editing_customer_info', {})
-                        c_name = saved_info.get('Customer_Name', user.get('Dealer_Name', 'Unknown'))
-                        c_email = saved_info.get('Email', user.get('Username', 'Unknown')) 
-                        c_phone = saved_info.get('Phone', user.get('Phone', 'Unknown'))
+                        c_name = saved_info.get('Customer_Name', user.get('Dealer_Name', ''))
+                        c_email = saved_info.get('Email', user.get('Username', '')) 
+                        c_phone = saved_info.get('Phone', user.get('Phone', ''))
+                        
+                        # 🛡️ 濾網二：強制把所有 NaN 替換成乾淨字串
+                        c_name = "" if pd.isna(c_name) else str(c_name)
+                        c_email = "" if pd.isna(c_email) else str(c_email)
+                        c_phone = "" if pd.isna(c_phone) else str(c_phone)
+                        
                         c_status = "賣方已修改"
                     else:
                         order_id = f"ORD-{datetime.now().strftime('%Y%m%d%H%M%S')}"
-                        c_name = user.get('Dealer_Name', 'Unknown')
+                        c_name = user.get('Dealer_Name', '')
                         c_email = contact_email_input 
-                        c_phone = user.get('Phone', 'Unknown')
+                        c_phone = user.get('Phone', '')
+                        
+                        # 🛡️ 濾網二：強制把所有 NaN 替換成乾淨字串
+                        c_name = "" if pd.isna(c_name) else str(c_name)
+                        c_email = "" if pd.isna(c_email) else str(c_email)
+                        c_phone = "" if pd.isna(c_phone) else str(c_phone)
+                        
                         c_status = "待處理"
                         
                         try:
@@ -1387,6 +1400,7 @@ def main_app(user):
 
                     final_cart_data = st.session_state.cart.copy()
                     
+                    # 🛡️ 濾網三：所有的金額都強迫轉為安全的整數
                     order_data = {
                         "Order_ID": order_id, 
                         "Order_Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -1394,12 +1408,12 @@ def main_app(user):
                         "Email": c_email, 
                         "Phone": c_phone,
                         "Items_Json": final_cart_data, 
-                        "Subtotal": grand_total_subtotal, 
-                        "Tax": grand_total_tax, 
-                        "Shipping": shipping, 
-                        "Total": grand_total, 
+                        "Subtotal": int(grand_total_subtotal), 
+                        "Tax": int(grand_total_tax), 
+                        "Shipping": int(shipping), 
+                        "Total": int(grand_total), 
                         "Status": c_status,
-                        "Extra_Discount": extra_discount,
+                        "Extra_Discount": int(extra_discount),
                         "Tracking_Number": "",
                         "Admin_Note": ""
                     }
@@ -1411,12 +1425,12 @@ def main_app(user):
                                 "Email": c_email,
                                 "Phone": c_phone,
                                 "Items_Json": final_cart_data,
-                                "Subtotal": grand_total_subtotal,
-                                "Tax": grand_total_tax,
-                                "Shipping": shipping,
-                                "Total": grand_total,
+                                "Subtotal": int(grand_total_subtotal),
+                                "Tax": int(grand_total_tax),
+                                "Shipping": int(shipping),
+                                "Total": int(grand_total),
                                 "Status": c_status,
-                                "Extra_Discount": extra_discount
+                                "Extra_Discount": int(extra_discount)
                             }
                             if update_data_by_id("orders", "Order_ID", order_id, update_dict):
                                 log_system_event(user, "Admin Edit Checkout", f"Order ID: {order_id}")
