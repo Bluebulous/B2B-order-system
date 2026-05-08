@@ -316,10 +316,11 @@ def main_app(user):
     if 'editing_customer_info' not in st.session_state: st.session_state.editing_customer_info = None
     
     if 'has_logged_cart_start' not in st.session_state: st.session_state.has_logged_cart_start = False
+    if 'product_picker_version' not in st.session_state: st.session_state.product_picker_version = 0
 
     def set_current_product(product_name):
         st.session_state.current_product_name = product_name
-        st.session_state.shop_product_picker = product_name
+        st.session_state.product_picker_version += 1
 
     announcement = get_announcement()
     if announcement and announcement.strip() != "":
@@ -440,7 +441,7 @@ def main_app(user):
                     "快速選擇商品",
                     product_list,
                     index=product_list.index(st.session_state.current_product_name),
-                    key="shop_product_picker",
+                    key=f"shop_product_picker_{st.session_state.product_picker_version}",
                 )
                 if selected_product != st.session_state.current_product_name:
                     set_current_product(selected_product)
@@ -1412,4 +1413,3 @@ if __name__ == "__main__":
     if 'user' not in st.session_state:
         login_page()
     else:
-        main_app(st.session_state['user'])
