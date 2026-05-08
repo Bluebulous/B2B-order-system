@@ -165,6 +165,21 @@ st.markdown(
        margin-top: 2px;
     }
 
+    /* === 桌面採購篩選欄位 === */
+    section[data-testid="stSidebar"] div[data-testid="stTextInput"] input {
+        color: #111111 !important;
+        caret-color: #111111 !important;
+        background-color: #f8fafc !important;
+    }
+    section[data-testid="stSidebar"] div[data-testid="stTextInput"] input::placeholder {
+        color: #6b7280 !important;
+        opacity: 1 !important;
+    }
+    section[data-testid="stSidebar"] div[data-baseweb="select"] > div {
+        background-color: #f8fafc !important;
+        color: #111111 !important;
+    }
+
     /* === 📱 手機版專用優化 === */
     @media only screen and (max-width: 768px) {
         .block-container {
@@ -295,21 +310,19 @@ def main_app(user):
             st.markdown('<div class="nav-section-title">FOR DOGS</div>', unsafe_allow_html=True)
             categories = sorted(df_products['Category'].dropna().unique().tolist())
             selected_cat = st.radio("Category", categories, label_visibility="collapsed")
-            df_filtered = df_products[df_products['Category'] == selected_cat].copy()
-
-            brand_options = ["全部品牌"] + sorted(df_filtered['Brand'].dropna().unique().tolist())
-            selected_brand_filter = st.selectbox("品牌篩選", brand_options, key="shop_brand_filter")
-            if selected_brand_filter != "全部品牌":
-                df_filtered = df_filtered[df_filtered['Brand'] == selected_brand_filter]
 
             search_query = st.text_input("搜尋商品", placeholder="輸入品名、品牌、顏色或尺寸", key="shop_search")
             if search_query.strip():
                 query = search_query.strip().lower()
-                searchable_cols = [col for col in ['Name', 'Brand', 'Color', 'Size'] if col in df_filtered.columns]
+                df_filtered = df_products.copy()
+                searchable_cols = [col for col in ['Name', 'Brand', 'Color', 'Size', 'Category'] if col in df_filtered.columns]
                 search_mask = pd.Series(False, index=df_filtered.index)
                 for col in searchable_cols:
                     search_mask = search_mask | df_filtered[col].astype(str).str.lower().str.contains(query, na=False)
                 df_filtered = df_filtered[search_mask]
+                st.caption("搜尋會跨所有項目，不受上方分類限制")
+            else:
+                df_filtered = df_products[df_products['Category'] == selected_cat].copy()
 
             product_list = sorted(df_filtered['Name'].dropna().unique().tolist())
             shop_product_scope = df_filtered
@@ -325,7 +338,8 @@ def main_app(user):
                 if selected_product != st.session_state.current_product_name:
                     st.session_state.current_product_name = selected_product
                     st.rerun()
-                st.caption(f"符合條件：{len(product_list)} 款商品 / {len(df_filtered)} 個 SKU")
+                scope_label = "搜尋結果" if search_query.strip() else selected_cat
+                st.caption(f"{scope_label}：{len(product_list)} 款商品 / {len(df_filtered)} 個 SKU")
             else:
                 st.warning("沒有符合篩選條件的商品")
     
