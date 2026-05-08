@@ -167,8 +167,8 @@ st.markdown(
 
     /* === 🛒 購物車專用微調 === */
     div[data-testid="stVerticalBlockBorderWrapper"] div[data-testid="stNumberInput"] {
-        max-width: 140px !important;
-        min-width: 120px !important;
+        max-width: 180px !important;
+        min-width: 150px !important;
     }
     div[data-testid="stVerticalBlockBorderWrapper"] div[data-baseweb="input"] {
         min-height: 40px !important;
@@ -1253,7 +1253,7 @@ def main_app(user):
                         )
 
                     for item in data['items']:
-                        c_name, c_qty, c_del, c_price = st.columns([2.35, 1.35, 0.58, 1.05], vertical_alignment="center")
+                        c_name, c_qty, c_del, c_price = st.columns([2.05, 1.85, 0.55, 1.0], vertical_alignment="center")
                         
                         with c_name:
                             st.markdown(f"<div class='cart-item-name'>{escape_html(item.get('name', ''))}</div><div class='cart-item-spec'>{escape_html(item.get('spec', ''))}</div>", unsafe_allow_html=True)
