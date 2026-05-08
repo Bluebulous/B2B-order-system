@@ -224,9 +224,13 @@ st.markdown(
         font-weight: 800;
         text-transform: uppercase;
         line-height: 1.25;
-        border-bottom: 1px solid #3d3d3d;
-        padding-bottom: 8px;
-        margin-bottom: 4px;
+        padding-bottom: 2px;
+        margin-bottom: 0;
+    }
+    .sku-table-divider {
+        height: 1px;
+        background: #3d3d3d;
+        margin: 4px 0 10px 0;
     }
     .sku-size {
         color: #ffffff !important;
@@ -1039,6 +1043,7 @@ def main_app(user):
             h3.markdown("<div class='table-head'>批發價<br>(未稅)</div>", unsafe_allow_html=True)
             h4.markdown("<div class='table-head'>零售價<br>(含稅)</div>", unsafe_allow_html=True)
             h5.markdown("") 
+            st.markdown("<div class='sku-table-divider'></div>", unsafe_allow_html=True)
 
             def add_to_cart_callback(p_id, p_name, p_spec, p_w, p_r, q_key, p_brand, p_category):
                 qty = st.session_state[q_key]
@@ -1174,21 +1179,20 @@ def main_app(user):
                     s_threshold = rule.get('shipping_threshold', 10000)
                     wholesale_remaining = max(0, int(w_threshold) - int(data['raw_wholesale_total']))
                     shipping_remaining = max(0, int(s_threshold) - int(data['raw_wholesale_total']))
+                    is_nonstop = str(b_name).strip().lower() == "non-stop dogwear"
                     
                     if data['is_wholesale_qualified']:
-                        msg = f"**{b_name}** | 小計 ${data['raw_wholesale_total']:,} / 批發門檻 ${int(w_threshold):,} ➝ **批發價**"
+                        msg = f"**{b_name}** | 已達批發門檻 ${int(w_threshold):,}"
                         if data['is_shipping_qualified']:
-                            msg += f" | 免運門檻已達 ${int(s_threshold):,}"
+                            msg += f" | 已免運"
                         else:
                             msg += f" | 再 ${shipping_remaining:,} 免運"
                         st.success(msg, icon="✅")
                     else:
-                        msg = f"**{b_name}** | 小計 ${data['raw_wholesale_total']:,} / 批發門檻 ${int(w_threshold):,} ➝ 目前 **零售{int(d_rate*10)}折**"
-                        msg += f" | 再 ${wholesale_remaining:,} 達批發價"
-                        if data['is_shipping_qualified']:
-                            msg += f" | 免運門檻已達 ${int(s_threshold):,}"
+                        if is_nonstop:
+                            msg = f"**{b_name}** | 未達批發門檻 | 目前零售 {int(d_rate * 10)} 折 | 再 ${wholesale_remaining:,} 達批發"
                         else:
-                            msg += f" | 再 ${shipping_remaining:,} 免運"
+                            msg = f"**{b_name}** | 未達出貨門檻 | 再 ${wholesale_remaining:,} 可出貨"
                         st.warning(msg, icon="⚠️")
 
                     for item in data['items']:
@@ -1414,4 +1418,3 @@ if __name__ == "__main__":
         login_page()
     else:
         main_app(st.session_state['user'])
-
