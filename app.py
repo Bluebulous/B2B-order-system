@@ -317,6 +317,10 @@ def main_app(user):
     
     if 'has_logged_cart_start' not in st.session_state: st.session_state.has_logged_cart_start = False
 
+    def set_current_product(product_name):
+        st.session_state.current_product_name = product_name
+        st.session_state.shop_product_picker = product_name
+
     announcement = get_announcement()
     if announcement and announcement.strip() != "":
         st.info(f"📢 **公告：** {announcement}", icon="📢")
@@ -439,7 +443,7 @@ def main_app(user):
                     key="shop_product_picker",
                 )
                 if selected_product != st.session_state.current_product_name:
-                    st.session_state.current_product_name = selected_product
+                    set_current_product(selected_product)
                     st.rerun()
                 scope_label = "搜尋結果" if search_query.strip() else selected_cat
                 st.caption(f"{scope_label}：{len(product_list)} 款商品 / {len(df_filtered)} 個 SKU")
@@ -1096,7 +1100,7 @@ def main_app(user):
                             if len(display_name) > 18:
                                 display_name = display_name[:17] + "..."
                             if st.button(display_name, key=f"view_{other_prod}_{i}_{idx}", width="stretch", help=str(other_prod)):
-                                st.session_state.current_product_name = other_prod
+                                set_current_product(other_prod)
                                 st.rerun()
             if not others: st.caption("此分類下無其他商品")
 
