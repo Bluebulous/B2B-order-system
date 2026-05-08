@@ -192,6 +192,97 @@ st.markdown(
         color: #111111 !important;
     }
 
+    /* === 桌面採購工作台視覺 === */
+    .product-title {
+        color: #f7f7f7 !important;
+        font-size: 22px;
+        font-weight: 800;
+        line-height: 1.25;
+        margin-bottom: 8px;
+        letter-spacing: 0;
+    }
+    .brand-pill {
+        display: inline-block;
+        color: #d6d6d6 !important;
+        background: #2a2a2a;
+        border: 1px solid #3f3f3f;
+        border-radius: 6px;
+        padding: 4px 9px;
+        font-size: 13px;
+        font-weight: 700;
+        margin-bottom: 18px;
+    }
+    .section-heading {
+        color: #f7f7f7 !important;
+        font-size: 18px;
+        font-weight: 800;
+        margin: 8px 0 18px 0;
+    }
+    .table-head {
+        color: #d9d9d9 !important;
+        font-size: 13px;
+        font-weight: 800;
+        text-transform: uppercase;
+        line-height: 1.25;
+        border-bottom: 1px solid #3d3d3d;
+        padding-bottom: 8px;
+        margin-bottom: 4px;
+    }
+    .sku-size {
+        color: #ffffff !important;
+        font-size: 15px;
+        font-weight: 800;
+    }
+    .price-wholesale {
+        color: #ff650f !important;
+        font-size: 15px;
+        font-weight: 800;
+        white-space: nowrap;
+    }
+    .price-retail {
+        color: #8d8d8d !important;
+        font-size: 14px;
+        font-weight: 700;
+        white-space: nowrap;
+    }
+    .cart-title {
+        color: #f7f7f7 !important;
+        font-size: 22px;
+        font-weight: 800;
+        margin-bottom: 4px;
+    }
+    .cart-subtitle {
+        color: #a6a6a6 !important;
+        font-size: 13px;
+        font-weight: 700;
+        margin-bottom: 14px;
+    }
+    .cart-total-box {
+        background: #252525;
+        border: 1px solid #3f3f3f;
+        border-radius: 8px;
+        padding: 14px 16px;
+        margin: 12px 0 14px 0;
+    }
+    .cart-total-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 16px;
+        color: #d8d8d8 !important;
+        font-size: 14px;
+        font-weight: 700;
+        margin-bottom: 8px;
+    }
+    .cart-total-row.final {
+        color: #ffffff !important;
+        font-size: 20px;
+        font-weight: 900;
+        margin-top: 10px;
+        margin-bottom: 0;
+        padding-top: 10px;
+        border-top: 1px solid #464646;
+    }
+
     /* === 📱 手機版專用優化 === */
     @media only screen and (max-width: 768px) {
         .block-container {
@@ -931,18 +1022,17 @@ def main_app(user):
 
     with col_select:
         with st.container(border=True):
-            st.markdown(f"<div style='font-size: 20px; font-weight: bold; margin-bottom: 10px;'>{escape_html(current_name)}</div>", unsafe_allow_html=True)
-            st.caption(f"Brand: {current_product_data.iloc[0]['Brand']}")
-            st.markdown("---")
+            st.markdown(f"<div class='product-title'>{escape_html(current_name)}</div>", unsafe_allow_html=True)
+            st.markdown(f"<span class='brand-pill'>Brand: {escape_html(current_product_data.iloc[0]['Brand'])}</span>", unsafe_allow_html=True)
             available_colors = current_product_data['Color'].unique()
             selected_color = st.selectbox("顏色", available_colors, key=f"color_sel_{current_name}")
             variants = current_product_data[current_product_data['Color'] == selected_color]
             st.markdown("<br>", unsafe_allow_html=True)
             h1, h2, h3, h4, h5 = st.columns([1.0, 1.6, 1.6, 1.6, 1.8], vertical_alignment="center")
-            h1.markdown("**尺寸**")
-            h2.markdown("**數量**")
-            h3.markdown("**批發價**\n(未稅)")
-            h4.markdown("**零售價**\n(含稅)")
+            h1.markdown("<div class='table-head'>尺寸</div>", unsafe_allow_html=True)
+            h2.markdown("<div class='table-head'>數量</div>", unsafe_allow_html=True)
+            h3.markdown("<div class='table-head'>批發價<br>(未稅)</div>", unsafe_allow_html=True)
+            h4.markdown("<div class='table-head'>零售價<br>(含稅)</div>", unsafe_allow_html=True)
             h5.markdown("") 
 
             def add_to_cart_callback(p_id, p_name, p_spec, p_w, p_r, q_key, p_brand, p_category):
@@ -966,12 +1056,12 @@ def main_app(user):
             for i, (_, sku) in enumerate(variants.iterrows()):
                 c_row = st.container()
                 c1, c2, c3, c4, c5 = c_row.columns([1.0, 1.6, 1.6, 1.6, 1.8], vertical_alignment="center")
-                with c1: st.markdown(f"<div style='font-weight:bold;'>{escape_html(sku['Size'])}</div>", unsafe_allow_html=True)
+                with c1: st.markdown(f"<div class='sku-size'>{escape_html(sku['Size'])}</div>", unsafe_allow_html=True)
                 with c2:
                     qty_key = f"qty_input_{sku['Product_ID']}_{selected_color}_{i}"
                     st.number_input("Qty", min_value=1, value=1, step=1, key=qty_key, label_visibility="collapsed")
-                with c3: st.markdown(f"<div style='color:#ff5500; font-weight:bold;'>${int(sku['Wholesale_Price'])}</div>", unsafe_allow_html=True)
-                with c4: st.markdown(f"<div style='color:#666;'>${int(sku['Retail_Price'])}</div>", unsafe_allow_html=True)
+                with c3: st.markdown(f"<div class='price-wholesale'>${int(sku['Wholesale_Price']):,}</div>", unsafe_allow_html=True)
+                with c4: st.markdown(f"<div class='price-retail'>${int(sku['Retail_Price']):,}</div>", unsafe_allow_html=True)
                 with c5:
                     st.button("ADD", key=f"add_{sku['Product_ID']}_{selected_color}_{i}", type="primary", width="stretch",
                         on_click=add_to_cart_callback,
@@ -985,7 +1075,7 @@ def main_app(user):
             main_img = convert_drive_url(img_row['Image_URL'])
             if main_img: st.image(main_img, width="stretch")
             else: st.warning("No Image")
-            st.markdown("<br><h4>Related Products / 同系列商品</h4>", unsafe_allow_html=True)
+            st.markdown("<div class='section-heading'>Related Products / 同系列商品</div>", unsafe_allow_html=True)
             current_category = current_product_data.iloc[0]['Category']
             same_category_products = shop_product_scope[shop_product_scope['Category'] == current_category]['Name'].unique()
             others = [p for p in same_category_products if p != current_name]
@@ -1018,13 +1108,13 @@ def main_app(user):
 
     with col_cart:
         with st.container(border=True):
-            st.markdown("<h3 style='font-size: 20px; font-weight: bold;'>🛒 購物車</h3>", unsafe_allow_html=True)
+            st.markdown("<div class='cart-title'>購物車</div>", unsafe_allow_html=True)
             st.divider()
             if st.session_state.cart:
                 BRAND_RULES, _ = get_brand_rules()
                 cart_qty_total = sum(int(item.get('qty', 0)) for item in st.session_state.cart.values())
                 cart_sku_total = len(st.session_state.cart)
-                st.caption(f"{cart_sku_total} 個 SKU / {cart_qty_total} 件商品")
+                st.markdown(f"<div class='cart-subtitle'>{cart_sku_total} 個 SKU / {cart_qty_total} 件商品</div>", unsafe_allow_html=True)
                 for item in st.session_state.cart.values():
                     if 'brand' not in item: item['brand'] = "default"
                     if 'wholesale_price' not in item: item['wholesale_price'] = item.get('Wholesale_Price', 0)
@@ -1148,22 +1238,21 @@ def main_app(user):
 
                 grand_total = grand_total_subtotal + grand_total_tax + shipping - extra_discount
                 
-                r1, r2 = st.columns(2)
-                r1.text("小計 (Subtotal)")
-                r2.text(f"${grand_total_subtotal}")
-                r1.text("稅金 (Tax)")
-                r2.text(f"${grand_total_tax}")
-                r1.text("運費 (Shipping)")
-                r2.text(shipping_msg)
+                summary_rows = [
+                    ("小計 Subtotal", f"${grand_total_subtotal:,}"),
+                    ("稅金 Tax", f"${grand_total_tax:,}"),
+                    ("運費 Shipping", shipping_msg),
+                ]
+                summary_html = "<div class='cart-total-box'>"
+                for label, value in summary_rows:
+                    summary_html += f"<div class='cart-total-row'><span>{escape_html(label)}</span><span>{escape_html(value)}</span></div>"
                 
                 if extra_discount != 0:
-                    r1.markdown("**手動調整 (Adjustment)**")
                     sign = "-" if extra_discount > 0 else "+"
-                    color = "green" if extra_discount > 0 else "red"
-                    r2.markdown(f"<span style='color:{color}; font-weight:bold;'>{sign}${abs(extra_discount)}</span>", unsafe_allow_html=True)
+                    summary_html += f"<div class='cart-total-row'><span>手動調整 Adjustment</span><span>{sign}${abs(extra_discount):,}</span></div>"
 
-                r1.markdown("#### 總計(含稅)")
-                r2.markdown(f"#### ${grand_total}")
+                summary_html += f"<div class='cart-total-row final'><span>總計含稅</span><span>${grand_total:,}</span></div></div>"
+                st.markdown(summary_html, unsafe_allow_html=True)
                 
                 if is_order_free_shipping: st.info("🎉 訂單已享免運優惠！")
                 else: st.warning(f"⚠️ 全單未達免運標準，需付運費 ${SHIPPING_FEE}")
