@@ -2,9 +2,13 @@ import streamlit as st
 import pandas as pd
 import altair as alt
 from datetime import datetime
+import hashlib
+import hmac
+import html
 import json
 import time
 import os
+import secrets
 from supabase import create_client, Client
 
 # Email 相關模組
@@ -58,7 +62,57 @@ TAX_RATE = 0.05
 SHIPPING_FEE = 125
 
 # 定義管理員帳號
-ADMIN_USERS = ["admin", "bluebulous", "test@test.com"] 
+DEFAULT_ADMIN_USERS = {"admin", "bluebulous", "test@test.com"}
+ADMIN_USERS = {
+    user.strip()
+    for user in os.environ.get("ADMIN_USERS", ",".join(DEFAULT_ADMIN_USERS)).split(",")
+    if user.strip()
+}
+ENABLE_DEFAULT_ADMIN = os.environ.get("ENABLE_DEFAULT_ADMIN", "").lower() in {"1", "true", "yes"}
+
+PASSWORD_HASH_PREFIX = "pbkdf2_sha256"
+PASSWORD_HASH_ITERATIONS = 260000
+
+def escape_html(value):
+    return html.escape("" if pd.isna(value) else str(value), quote=True)
+
+def hash_password(password):
+    salt = secrets.token_hex(16)
+    digest = hashlib.pbkdf2_hmac(
+        "sha256",
+        str(password).encode("utf-8"),
+        salt.encode("utf-8"),
+        PASSWORD_HASH_ITERATIONS,
+    ).hex()
+    return f"{PASSWORD_HASH_PREFIX}${PASSWORD_HASH_ITERATIONS}${salt}${digest}"
+
+def is_password_hash(stored_password):
+    return str(stored_password).startswith(f"{PASSWORD_HASH_PREFIX}$")
+
+def verify_password(stored_password, provided_password):
+    stored_password = "" if pd.isna(stored_password) else str(stored_password)
+    provided_password = "" if provided_password is None else str(provided_password)
+
+    if is_password_hash(stored_password):
+        try:
+            _, iterations, salt, expected_digest = stored_password.split("$", 3)
+            actual_digest = hashlib.pbkdf2_hmac(
+                "sha256",
+                provided_password.encode("utf-8"),
+                salt.encode("utf-8"),
+                int(iterations),
+            ).hex()
+            return hmac.compare_digest(actual_digest, expected_digest)
+        except Exception:
+            return False
+
+    return hmac.compare_digest(stored_password, provided_password)
+
+def is_admin(user):
+    username = str(user.get("Username", "")).strip()
+    role = str(user.get("Role", user.get("role", ""))).strip().lower()
+    is_admin_flag = str(user.get("Is_Admin", user.get("is_admin", ""))).strip().lower()
+    return username in ADMIN_USERS or role == "admin" or is_admin_flag in {"true", "1", "yes"}
 
 # --- 2. CSS 樣式 ---
 st.markdown(
@@ -292,6 +346,46 @@ def delete_data_by_id(table_name, match_col, match_val):
         st.error(f"刪除 {table_name} 失敗: {e}")
         return False
 
+def safe_number(value, default=0):
+    parsed = pd.to_numeric(value, errors='coerce')
+    if pd.isna(parsed):
+        return default
+    return parsed
+
+def save_brand_rules(edited_df, original_df):
+    clean_records = []
+    for record in edited_df.to_dict(orient='records'):
+        brand = str(record.get('Brand', '')).strip()
+        if not brand:
+            continue
+        clean_records.append({
+            "Brand": brand,
+            "Wholesale_Threshold": int(safe_number(record.get('Wholesale_Threshold', 0), 0)),
+            "Shipping_Threshold": int(safe_number(record.get('Shipping_Threshold', 0), 0)),
+            "Discount": float(safe_number(record.get('Discount', 1), 1)),
+        })
+
+    original_brands = set()
+    if not original_df.empty and 'Brand' in original_df.columns:
+        original_brands = {str(brand).strip() for brand in original_df['Brand'].dropna() if str(brand).strip()}
+
+    edited_brands = {record["Brand"] for record in clean_records}
+
+    for record in clean_records:
+        brand = record["Brand"]
+        if brand in original_brands:
+            if not update_data_by_id("brandrules", "Brand", brand, record):
+                return False
+        else:
+            if not insert_data("brandrules", record):
+                return False
+
+    for removed_brand in original_brands - edited_brands:
+        if not delete_data_by_id("brandrules", "Brand", removed_brand):
+            return False
+
+    return True
+
 # 寫入系統日誌 (Log)
 def log_system_event(user_data, action, details=""):
     try:
@@ -347,7 +441,7 @@ def display_status_badges(status_str):
     for p in parts:
         p = p.strip()
         css_class = keywords.get(p, "badge-pending")
-        badges_html += f'<span class="status-badge {css_class}">{p}</span>'
+        badges_html += f'<span class="status-badge {css_class}">{escape_html(p)}</span>'
     return badges_html
 
 def send_order_email(order_data, cart_items, is_update=False):
@@ -380,17 +474,17 @@ def send_order_email(order_data, cart_items, is_update=False):
     for item in cart_items.values():
         rows_html += f"""
         <tr style="border-bottom: 1px solid #eee;">
-            <td style="padding: 8px;">{item['name']}<br><small style="color:#666;">{item['spec']}</small></td>
-            <td style="padding: 8px; text-align: center;">x{item['qty']}</td>
-            <td style="padding: 8px; text-align: right;">${item['final_subtotal']}</td>
+            <td style="padding: 8px;">{escape_html(item.get('name', ''))}<br><small style="color:#666;">{escape_html(item.get('spec', ''))}</small></td>
+            <td style="padding: 8px; text-align: center;">x{escape_html(item.get('qty', ''))}</td>
+            <td style="padding: 8px; text-align: right;">${escape_html(item.get('final_subtotal', ''))}</td>
         </tr>
         """
         
     extra_info = ""
     if order_data.get('Tracking_Number'):
-        extra_info += f"<p style='margin: 5px 0;'><strong>📦 物流單號:</strong> {order_data['Tracking_Number']}</p>"
+        extra_info += f"<p style='margin: 5px 0;'><strong>📦 物流單號:</strong> {escape_html(order_data['Tracking_Number'])}</p>"
     if order_data.get('Admin_Note'):
-        extra_info += f"<p style='margin: 5px 0; color: #ff5500;'><strong>📝 賣家備註:</strong> {order_data['Admin_Note']}</p>"
+        extra_info += f"<p style='margin: 5px 0; color: #ff5500;'><strong>📝 賣家備註:</strong> {escape_html(order_data['Admin_Note'])}</p>"
     if order_data.get('Extra_Discount') and int(order_data['Extra_Discount']) != 0:
         extra_val = int(order_data['Extra_Discount'])
         sign = "-" if extra_val > 0 else "+"
@@ -402,12 +496,12 @@ def send_order_email(order_data, cart_items, is_update=False):
         <body style="font-family: Arial, sans-serif; color: #333;">
             <div style="max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 8px;">
                 <h2 style="color: #ff5500;">Bluebulous {title_text}</h2>
-                <p>親愛的 <strong>{order_data['Customer_Name']}</strong> 您好，</p>
-                <p>您的訂單 <b>{order_data['Order_ID']}</b> 狀態如下。</p>
+                <p>親愛的 <strong>{escape_html(order_data['Customer_Name'])}</strong> 您好，</p>
+                <p>您的訂單 <b>{escape_html(order_data['Order_ID'])}</b> 狀態如下。</p>
                 
                 <div style="background-color: #f9f9f9; padding: 15px; border-radius: 4px; margin: 20px 0;">
-                    <p style="margin: 5px 0;"><strong>訂單狀態:</strong> <span style="font-size: 16px; font-weight: bold;">{order_data['Status']}</span></p>
-                    <p style="margin: 5px 0;"><strong>總金額:</strong> <span style="font-size: 18px; color: #ff5500; font-weight: bold;">${order_data['Total']}</span></p>
+                    <p style="margin: 5px 0;"><strong>訂單狀態:</strong> <span style="font-size: 16px; font-weight: bold;">{escape_html(order_data['Status'])}</span></p>
+                    <p style="margin: 5px 0;"><strong>總金額:</strong> <span style="font-size: 18px; color: #ff5500; font-weight: bold;">${escape_html(order_data['Total'])}</span></p>
                     {extra_info}
                 </div>
 
@@ -531,7 +625,7 @@ def main_app(user):
         if st.button("個人資料", width="stretch"):
             st.session_state.page = 'profile'
             st.rerun()
-        if user.get('Username') in ADMIN_USERS:
+        if is_admin(user):
             st.markdown("---")
             if st.button("🔧 管理員後台", width="stretch"):
                 st.session_state.page = 'admin_orders'
@@ -647,7 +741,7 @@ def main_app(user):
                 new_pwd = st.text_input("新密碼", type="password")
                 confirm_pwd = st.text_input("確認新密碼", type="password")
                 if st.form_submit_button("更新密碼", type="primary", width="stretch"):
-                    if str(current_pwd) != str(user['Password']):
+                    if not verify_password(user.get('Password', ''), current_pwd):
                         st.error("❌ 目前密碼輸入錯誤")
                     elif new_pwd != confirm_pwd:
                         st.error("❌ 兩次新密碼輸入不一致")
@@ -655,15 +749,16 @@ def main_app(user):
                         st.error("❌ 新密碼不得為空")
                     else:
                         try:
-                            if update_data_by_id("users", "Username", user['Username'], {"Password": new_pwd}):
-                                st.session_state['user']['Password'] = new_pwd
+                            hashed_password = hash_password(new_pwd)
+                            if update_data_by_id("users", "Username", user['Username'], {"Password": hashed_password}):
+                                st.session_state['user']['Password'] = hashed_password
                                 st.success("✅ 密碼修改成功！")
                         except Exception as e: st.error(f"❌ 更新失敗: {e}")
         return
 
     # 4. 管理員後台
     if st.session_state.page == 'admin_orders':
-        if user['Username'] not in ADMIN_USERS:
+        if not is_admin(user):
             st.warning("您沒有權限訪問此頁面")
             st.session_state.page = 'shop'
             st.rerun()
@@ -846,18 +941,11 @@ def main_app(user):
                 )
                 if st.button("💾 儲存設定", type="primary"):
                     try:
-                        supabase.table("brandrules").delete().neq("brand", "THIS_WILL_NEVER_MATCH").execute()
-                        records = edited_df.to_dict(orient='records')
-                        if records:
-                            for r in records:
-                                r.pop('id', None)
-                                r.pop('created_at', None)
-                            lower_records = [{k.lower(): v for k, v in r.items()} for r in records]
-                            supabase.table("brandrules").insert(lower_records).execute()
-                        st.success("設定已更新！")
-                        get_brand_rules.clear()
-                        time.sleep(1)
-                        st.rerun()
+                        if save_brand_rules(edited_df, df_rules):
+                            st.success("設定已更新！")
+                            get_brand_rules.clear()
+                            time.sleep(1)
+                            st.rerun()
                     except Exception as e: st.error(f"儲存失敗: {e}")
             else:
                 st.warning("目前 BrandRules 資料表為空。")
@@ -1129,7 +1217,7 @@ def main_app(user):
 
     with col_select:
         with st.container(border=True):
-            st.markdown(f"<div style='font-size: 20px; font-weight: bold; margin-bottom: 10px;'>{current_name}</div>", unsafe_allow_html=True)
+            st.markdown(f"<div style='font-size: 20px; font-weight: bold; margin-bottom: 10px;'>{escape_html(current_name)}</div>", unsafe_allow_html=True)
             st.caption(f"Brand: {current_product_data.iloc[0]['Brand']}")
             st.markdown("---")
             available_colors = current_product_data['Color'].unique()
@@ -1164,7 +1252,7 @@ def main_app(user):
             for i, (_, sku) in enumerate(variants.iterrows()):
                 c_row = st.container()
                 c1, c2, c3, c4, c5 = c_row.columns([1.2, 2.2, 1.5, 1.5, 1.5], vertical_alignment="center")
-                with c1: st.markdown(f"<div style='font-weight:bold;'>{str(sku['Size'])}</div>", unsafe_allow_html=True)
+                with c1: st.markdown(f"<div style='font-weight:bold;'>{escape_html(sku['Size'])}</div>", unsafe_allow_html=True)
                 with c2:
                     qty_key = f"qty_input_{sku['Product_ID']}_{selected_color}_{i}"
                     st.number_input("Qty", min_value=1, value=1, step=1, key=qty_key, label_visibility="collapsed")
@@ -1282,7 +1370,7 @@ def main_app(user):
                         c_name, c_qty, c_del, c_price = st.columns([2.0, 1.8, 0.4, 1.2], vertical_alignment="center")
                         
                         with c_name:
-                            st.markdown(f"<div style='line-height:1.2; font-weight:bold;'>{item['name']}</div><div style='color:#cccccc; font-size:12px; margin-top:2px;'>{item['spec']}</div>", unsafe_allow_html=True)
+                            st.markdown(f"<div style='line-height:1.2; font-weight:bold;'>{escape_html(item.get('name', ''))}</div><div style='color:#cccccc; font-size:12px; margin-top:2px;'>{escape_html(item.get('spec', ''))}</div>", unsafe_allow_html=True)
                         
                         with c_qty:
                             st.number_input(
@@ -1318,7 +1406,7 @@ def main_app(user):
                     default_discount = int(st.session_state.get('editing_customer_info', {}).get('Extra_Discount', 0))
 
                 extra_discount = 0
-                if user.get('Username') in ADMIN_USERS:
+                if is_admin(user):
                     st.markdown("---")
                     extra_discount = st.number_input(
                         "🔧 管理員：總價手動調整 (+輸入折扣扣除, -輸入額外加價)", 
@@ -1455,7 +1543,7 @@ def main_app(user):
                         st.session_state.editing_customer_info = None
                         st.session_state.has_logged_cart_start = False 
                         time.sleep(1)
-                        if user.get('Username') in ADMIN_USERS: st.session_state.page = 'admin_orders'
+                        if is_admin(user): st.session_state.page = 'admin_orders'
                         else: st.session_state.page = 'shop'
                         st.rerun()
                     except Exception as e: st.error(f"訂單處理失敗: {e}")
@@ -1472,21 +1560,27 @@ def login_page():
             p = st.text_input("Password", type="password")
             if st.form_submit_button("Login", width="stretch", type="primary"):
                 with st.spinner("正在連線驗證中..."):
+                    username = str(u).strip()
                     users = get_data("users")
                     
                     if users.empty:
-                        if u == "admin" and p == "admin":
+                        if ENABLE_DEFAULT_ADMIN and username == "admin" and p == "admin":
                             st.session_state['user'] = {"Username": "admin", "Dealer_Name": "System Admin", "Password": "admin"}
                             st.rerun()
                         else:
-                            st.error("系統資料庫目前為空。若您是管理員，請使用預設帳密 (admin/admin) 登入以建立資料。")
+                            st.error("系統資料庫目前為空，且預設管理員登入已關閉。請先建立正式管理員帳號。")
                     elif 'Username' not in users.columns:
                         st.error("⚠️ 資料表結構錯誤：找不到 Username 欄位。")
                     else:
-                        match = users[users['Username'] == u]
-                        if not match.empty and str(match.iloc[0]['Password']) == p:
-                            st.session_state['user'] = match.iloc[0].to_dict()
-                            log_system_event(match.iloc[0].to_dict(), "Login", "User logged in")
+                        match = users[users['Username'].astype(str).str.strip() == username]
+                        if not match.empty and verify_password(match.iloc[0].get('Password', ''), p):
+                            user_record = match.iloc[0].to_dict()
+                            if not is_password_hash(user_record.get('Password', '')):
+                                upgraded_password = hash_password(p)
+                                if update_data_by_id("users", "Username", username, {"Password": upgraded_password}):
+                                    user_record['Password'] = upgraded_password
+                            st.session_state['user'] = user_record
+                            log_system_event(user_record, "Login", "User logged in")
                             st.rerun()
                         else: 
                             st.error("帳號或密碼錯誤")
