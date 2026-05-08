@@ -95,10 +95,10 @@ st.markdown(
     
     /* 7. 卡片內按鈕樣式 (產品名稱 & 購物車按鈕) */
     div[data-testid="stVerticalBlockBorderWrapper"] button[kind="secondary"] {
-        border: none !important;            
-        background-color: transparent !important; 
+        border: 1px solid #4a4a4a !important;
+        background-color: transparent !important;
         box-shadow: none !important;        
-        padding: 0px !important; 
+        padding: 8px 10px !important;
         min-height: 0px !important;
         height: auto !important;
     }
@@ -106,16 +106,18 @@ st.markdown(
     div[data-testid="stVerticalBlockBorderWrapper"] button[kind="secondary"] p {
         color: #000000 !important;          
         font-weight: bold !important;
-        font-size: 16px !important;         
+        font-size: 13px !important;
         margin: 0px !important;
         padding: 0px !important;
-        line-height: 1.2 !important;
+        line-height: 1.35 !important;
+        word-break: keep-all !important;
+        overflow-wrap: anywhere !important;
     }
 
     div[data-testid="stVerticalBlockBorderWrapper"] button[kind="secondary"]:hover {
         color: #ff5000 !important;          
         background-color: #f0f0f0 !important; 
-        border: none !important;
+        border: 1px solid #ff5000 !important;
     }
     div[data-testid="stVerticalBlockBorderWrapper"] button[kind="secondary"]:hover p {
         color: #ff5000 !important;
@@ -135,6 +137,16 @@ st.markdown(
     }
     button[kind="primary"] p {
         color: white !important; 
+    }
+    div[data-testid="stVerticalBlockBorderWrapper"] button[kind="primary"] {
+        min-width: 72px !important;
+        padding-left: 10px !important;
+        padding-right: 10px !important;
+        white-space: nowrap !important;
+    }
+    div[data-testid="stVerticalBlockBorderWrapper"] button[kind="primary"] p {
+        white-space: nowrap !important;
+        word-break: keep-all !important;
     }
     
     /* 狀態標籤樣式 */
@@ -926,7 +938,7 @@ def main_app(user):
             selected_color = st.selectbox("顏色", available_colors, key=f"color_sel_{current_name}")
             variants = current_product_data[current_product_data['Color'] == selected_color]
             st.markdown("<br>", unsafe_allow_html=True)
-            h1, h2, h3, h4, h5 = st.columns([1.2, 2.2, 1.5, 1.5, 1.5], vertical_alignment="center")
+            h1, h2, h3, h4, h5 = st.columns([1.0, 1.6, 1.6, 1.6, 1.8], vertical_alignment="center")
             h1.markdown("**尺寸**")
             h2.markdown("**數量**")
             h3.markdown("**批發價**\n(未稅)")
@@ -953,7 +965,7 @@ def main_app(user):
 
             for i, (_, sku) in enumerate(variants.iterrows()):
                 c_row = st.container()
-                c1, c2, c3, c4, c5 = c_row.columns([1.2, 2.2, 1.5, 1.5, 1.5], vertical_alignment="center")
+                c1, c2, c3, c4, c5 = c_row.columns([1.0, 1.6, 1.6, 1.6, 1.8], vertical_alignment="center")
                 with c1: st.markdown(f"<div style='font-weight:bold;'>{escape_html(sku['Size'])}</div>", unsafe_allow_html=True)
                 with c2:
                     qty_key = f"qty_input_{sku['Product_ID']}_{selected_color}_{i}"
@@ -977,9 +989,9 @@ def main_app(user):
             current_category = current_product_data.iloc[0]['Category']
             same_category_products = shop_product_scope[shop_product_scope['Category'] == current_category]['Name'].unique()
             others = [p for p in same_category_products if p != current_name]
-            for i in range(0, len(others), 3):
-                cols = st.columns(3)
-                batch = others[i:i+3]
+            for i in range(0, len(others), 2):
+                cols = st.columns(2)
+                batch = others[i:i+2]
                 for idx, other_prod in enumerate(batch):
                     row = df_products[df_products['Name'] == other_prod].iloc[0]
                     thumb = convert_drive_url(row['Image_URL'])
@@ -990,7 +1002,10 @@ def main_app(user):
                             else:
                                 st.markdown("<div style='height: 150px; background-color: #f0f0f0; display: flex; align-items: center; justify-content: center; color: #666;'>No Image</div>", unsafe_allow_html=True)
                             
-                            if st.button(f" {other_prod}", key=f"view_{other_prod}_{i}_{idx}", width="stretch"):
+                            display_name = str(other_prod)
+                            if len(display_name) > 18:
+                                display_name = display_name[:17] + "..."
+                            if st.button(display_name, key=f"view_{other_prod}_{i}_{idx}", width="stretch", help=str(other_prod)):
                                 st.session_state.current_product_name = other_prod
                                 st.rerun()
             if not others: st.caption("此分類下無其他商品")
