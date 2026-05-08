@@ -242,6 +242,8 @@ def main_app(user):
     elif st.session_state.current_product_name not in df_products['Name'].unique():
         st.session_state.current_product_name = df_products['Name'].unique()[0]
 
+    shop_product_scope = df_products
+
     with st.sidebar:
         logo_url = "https://raw.githubusercontent.com/Bluebulous/product-images/main/LOGO-white-01.png"
         st.image(logo_url, width="stretch")
@@ -253,7 +255,8 @@ def main_app(user):
         
         if st.session_state.cart:
             total_qty = sum(item['qty'] for item in st.session_state.cart.values())
-            st.info(f"🛒 購物車內有 {total_qty} 件商品")
+            total_skus = len(st.session_state.cart)
+            st.info(f"🛒 購物車內有 {total_skus} 個 SKU / {total_qty} 件商品")
             if st.button("前往結帳 (查看詳情)", type="primary", width="stretch"):
                  st.toast("請往下滑動查看完整購物車", icon="👇")
         else:
@@ -290,12 +293,41 @@ def main_app(user):
         if st.session_state.page == 'shop':
             st.divider()
             st.markdown('<div class="nav-section-title">FOR DOGS</div>', unsafe_allow_html=True)
-            categories = list(df_products['Category'].unique())
+            categories = sorted(df_products['Category'].dropna().unique().tolist())
             selected_cat = st.radio("Category", categories, label_visibility="collapsed")
-            df_filtered = df_products[df_products['Category'] == selected_cat]
-            product_list = df_filtered['Name'].unique()
-            if st.session_state.current_product_name not in product_list and len(product_list) > 0:
-                st.session_state.current_product_name = product_list[0]
+            df_filtered = df_products[df_products['Category'] == selected_cat].copy()
+
+            brand_options = ["全部品牌"] + sorted(df_filtered['Brand'].dropna().unique().tolist())
+            selected_brand_filter = st.selectbox("品牌篩選", brand_options, key="shop_brand_filter")
+            if selected_brand_filter != "全部品牌":
+                df_filtered = df_filtered[df_filtered['Brand'] == selected_brand_filter]
+
+            search_query = st.text_input("搜尋商品", placeholder="輸入品名、品牌、顏色或尺寸", key="shop_search")
+            if search_query.strip():
+                query = search_query.strip().lower()
+                searchable_cols = [col for col in ['Name', 'Brand', 'Color', 'Size'] if col in df_filtered.columns]
+                search_mask = pd.Series(False, index=df_filtered.index)
+                for col in searchable_cols:
+                    search_mask = search_mask | df_filtered[col].astype(str).str.lower().str.contains(query, na=False)
+                df_filtered = df_filtered[search_mask]
+
+            product_list = sorted(df_filtered['Name'].dropna().unique().tolist())
+            shop_product_scope = df_filtered
+            if product_list:
+                if st.session_state.current_product_name not in product_list:
+                    st.session_state.current_product_name = product_list[0]
+                selected_product = st.selectbox(
+                    "快速選擇商品",
+                    product_list,
+                    index=product_list.index(st.session_state.current_product_name),
+                    key="shop_product_picker",
+                )
+                if selected_product != st.session_state.current_product_name:
+                    st.session_state.current_product_name = selected_product
+                    st.rerun()
+                st.caption(f"符合條件：{len(product_list)} 款商品 / {len(df_filtered)} 個 SKU")
+            else:
+                st.warning("沒有符合篩選條件的商品")
     
     # 1. 歷史訂單頁
     if st.session_state.page == 'history':
@@ -863,6 +895,10 @@ def main_app(user):
         return
 
     # 3. 商店頁
+    if shop_product_scope.empty:
+        st.warning("目前沒有符合篩選條件的商品，請調整左側搜尋或篩選。")
+        return
+
     col_visual, col_select, col_cart = st.columns([1.5, 1.5, 2.0], gap="medium")
     current_name = st.session_state.current_product_name
     current_product_data = df_products[df_products['Name'] == current_name]
@@ -925,7 +961,7 @@ def main_app(user):
             else: st.warning("No Image")
             st.markdown("<br><h4>Related Products / 同系列商品</h4>", unsafe_allow_html=True)
             current_category = current_product_data.iloc[0]['Category']
-            same_category_products = df_products[df_products['Category'] == current_category]['Name'].unique()
+            same_category_products = shop_product_scope[shop_product_scope['Category'] == current_category]['Name'].unique()
             others = [p for p in same_category_products if p != current_name]
             for i in range(0, len(others), 3):
                 cols = st.columns(3)
@@ -957,6 +993,9 @@ def main_app(user):
             st.divider()
             if st.session_state.cart:
                 BRAND_RULES, _ = get_brand_rules()
+                cart_qty_total = sum(int(item.get('qty', 0)) for item in st.session_state.cart.values())
+                cart_sku_total = len(st.session_state.cart)
+                st.caption(f"{cart_sku_total} 個 SKU / {cart_qty_total} 件商品")
                 for item in st.session_state.cart.values():
                     if 'brand' not in item: item['brand'] = "default"
                     if 'wholesale_price' not in item: item['wholesale_price'] = item.get('Wholesale_Price', 0)
@@ -1008,14 +1047,24 @@ def main_app(user):
                     rule = BRAND_RULES.get(b_name, BRAND_RULES.get("default", safe_default))
                     d_rate = rule.get('discount_rate', 0.7)
                     w_threshold = rule.get('wholesale_threshold', 10000)
+                    s_threshold = rule.get('shipping_threshold', 10000)
+                    wholesale_remaining = max(0, int(w_threshold) - int(data['raw_wholesale_total']))
+                    shipping_remaining = max(0, int(s_threshold) - int(data['raw_wholesale_total']))
                     
                     if data['is_wholesale_qualified']:
-                        msg = f"**{b_name}** | 小計 ${data['raw_wholesale_total']} (已達門檻 ${w_threshold}) ➝ **批發價**"
-                        if data['is_shipping_qualified']: msg += " | 🚚 免運"
+                        msg = f"**{b_name}** | 小計 ${data['raw_wholesale_total']:,} / 批發門檻 ${int(w_threshold):,} ➝ **批發價**"
+                        if data['is_shipping_qualified']:
+                            msg += f" | 免運門檻已達 ${int(s_threshold):,}"
+                        else:
+                            msg += f" | 再 ${shipping_remaining:,} 免運"
                         st.success(msg, icon="✅")
                     else:
-                        msg = f"**{b_name}** | 小計 ${data['raw_wholesale_total']} (未達門檻 ${w_threshold}) ➝ **零售{int(d_rate*10)}折**"
-                        if data['is_shipping_qualified']: msg += " | 🚚 免運"
+                        msg = f"**{b_name}** | 小計 ${data['raw_wholesale_total']:,} / 批發門檻 ${int(w_threshold):,} ➝ 目前 **零售{int(d_rate*10)}折**"
+                        msg += f" | 再 ${wholesale_remaining:,} 達批發價"
+                        if data['is_shipping_qualified']:
+                            msg += f" | 免運門檻已達 ${int(s_threshold):,}"
+                        else:
+                            msg += f" | 再 ${shipping_remaining:,} 免運"
                         st.warning(msg, icon="⚠️")
 
                     for item in data['items']:
