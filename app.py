@@ -286,6 +286,55 @@ st.markdown(
         padding-top: 10px;
         border-top: 1px solid #464646;
     }
+    .threshold-card {
+        border-radius: 8px;
+        padding: 12px 14px;
+        margin: 10px 0 14px 0;
+        border: 1px solid #3f3f3f;
+        background: #262626;
+    }
+    .threshold-card.ok {
+        border-color: #2f6b45;
+        background: #173322;
+    }
+    .threshold-card.warn {
+        border-color: #6b642e;
+        background: #353416;
+    }
+    .threshold-title {
+        color: #ffffff !important;
+        font-size: 14px;
+        font-weight: 900;
+        line-height: 1.25;
+        margin-bottom: 4px;
+    }
+    .threshold-meta {
+        color: #d6d6d6 !important;
+        font-size: 12px;
+        font-weight: 700;
+        line-height: 1.35;
+    }
+    .cart-item-name {
+        color: #f4f4f4 !important;
+        font-size: 13px;
+        font-weight: 800;
+        line-height: 1.18;
+        letter-spacing: 0;
+    }
+    .cart-item-spec {
+        color: #a8a8a8 !important;
+        font-size: 11px;
+        font-weight: 700;
+        line-height: 1.2;
+        margin-top: 3px;
+    }
+    .cart-item-price {
+        color: #f7f7f7 !important;
+        font-size: 14px;
+        font-weight: 900;
+        text-align: right;
+        white-space: nowrap;
+    }
 
     /* === 📱 手機版專用優化 === */
     @media only screen and (max-width: 768px) {
@@ -1182,24 +1231,32 @@ def main_app(user):
                     is_nonstop = str(b_name).strip().lower() == "non-stop dogwear"
                     
                     if data['is_wholesale_qualified']:
-                        msg = f"**{b_name}** | 已達批發門檻 ${int(w_threshold):,}"
+                        title = f"{escape_html(b_name)} | 已達批發門檻"
                         if data['is_shipping_qualified']:
-                            msg += f" | 已免運"
+                            meta = f"小計 ${data['raw_wholesale_total']:,} | 已免運"
                         else:
-                            msg += f" | 再 ${shipping_remaining:,} 免運"
-                        st.success(msg, icon="✅")
+                            meta = f"小計 ${data['raw_wholesale_total']:,} | 再 ${shipping_remaining:,} 免運"
+                        st.markdown(
+                            f"<div class='threshold-card ok'><div class='threshold-title'>{title}</div><div class='threshold-meta'>{escape_html(meta)}</div></div>",
+                            unsafe_allow_html=True
+                        )
                     else:
                         if is_nonstop:
-                            msg = f"**{b_name}** | 未達批發門檻 | 目前零售 {int(d_rate * 10)} 折 | 再 ${wholesale_remaining:,} 達批發"
+                            title = f"{escape_html(b_name)} | 未達批發門檻"
+                            meta = f"目前零售 {int(d_rate * 10)} 折 | 再 ${wholesale_remaining:,} 達批發"
                         else:
-                            msg = f"**{b_name}** | 未達出貨門檻 | 再 ${wholesale_remaining:,} 可出貨"
-                        st.warning(msg, icon="⚠️")
+                            title = f"{escape_html(b_name)} | 未達出貨門檻"
+                            meta = f"再 ${wholesale_remaining:,} 可出貨"
+                        st.markdown(
+                            f"<div class='threshold-card warn'><div class='threshold-title'>{title}</div><div class='threshold-meta'>{escape_html(meta)}</div></div>",
+                            unsafe_allow_html=True
+                        )
 
                     for item in data['items']:
-                        c_name, c_qty, c_del, c_price = st.columns([2.0, 1.8, 0.4, 1.2], vertical_alignment="center")
+                        c_name, c_qty, c_del, c_price = st.columns([2.35, 1.35, 0.58, 1.05], vertical_alignment="center")
                         
                         with c_name:
-                            st.markdown(f"<div style='line-height:1.2; font-weight:bold;'>{escape_html(item.get('name', ''))}</div><div style='color:#cccccc; font-size:12px; margin-top:2px;'>{escape_html(item.get('spec', ''))}</div>", unsafe_allow_html=True)
+                            st.markdown(f"<div class='cart-item-name'>{escape_html(item.get('name', ''))}</div><div class='cart-item-spec'>{escape_html(item.get('spec', ''))}</div>", unsafe_allow_html=True)
                         
                         with c_qty:
                             st.number_input(
@@ -1214,12 +1271,12 @@ def main_app(user):
                             )
                         
                         with c_del:
-                            if st.button("✖", key=f"cart_del_{item['id']}", type="secondary", help="移除此商品"):
+                            if st.button("✕", key=f"cart_del_{item['id']}", type="secondary", width="stretch", help="移除此商品"):
                                 del st.session_state.cart[item['id']]
                                 st.rerun()
                         
                         with c_price:
-                            st.markdown(f"<div style='text-align:right; font-weight:bold;'>${item['final_subtotal']}</div>", unsafe_allow_html=True)
+                            st.markdown(f"<div class='cart-item-price'>${int(item['final_subtotal']):,}</div>", unsafe_allow_html=True)
                     st.divider()
 
                 if is_order_free_shipping:
