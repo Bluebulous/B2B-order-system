@@ -427,6 +427,61 @@ st.markdown(
         font-weight: 700;
         margin-bottom: 12px;
     }
+    .rank-panel {
+        border: 1px solid #343a46;
+        background: #1b1f27;
+        border-radius: 10px;
+        padding: 12px 14px;
+        margin-bottom: 12px;
+    }
+    .rank-panel-title {
+        color: #f8fafc !important;
+        font-size: 14px;
+        font-weight: 950;
+        margin-bottom: 10px;
+    }
+    .rank-row {
+        display: grid;
+        grid-template-columns: 34px minmax(0, 1fr) 92px 96px;
+        gap: 10px;
+        align-items: center;
+        border-top: 1px solid #2c313a;
+        padding: 9px 0;
+    }
+    .rank-row:first-of-type {
+        border-top: none;
+    }
+    .rank-badge {
+        width: 24px;
+        height: 24px;
+        border-radius: 999px;
+        background: #d9ff74;
+        color: #111827 !important;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 12px;
+        font-weight: 950;
+    }
+    .rank-product {
+        color: #f8fafc !important;
+        font-size: 13px;
+        font-weight: 850;
+        line-height: 1.25;
+    }
+    .rank-meta {
+        color: #9ca3af !important;
+        font-size: 11px;
+        font-weight: 750;
+        margin-top: 3px;
+    }
+    .rank-number {
+        color: #e5e7eb !important;
+        font-size: 12px;
+        font-weight: 850;
+        text-align: right;
+        white-space: nowrap;
+    }
 
     /* === 📱 手機版專用優化 === */
     @media only screen and (max-width: 768px) {
@@ -1383,35 +1438,24 @@ def main_app(user):
                             category_product_rank['Rank'] = category_product_rank.groupby('Category')['Revenue'].rank(method='first', ascending=False).astype(int)
                             category_top3 = category_product_rank[category_product_rank['Rank'] <= 3].copy()
                             category_top3 = category_top3.sort_values(['Category', 'Rank'])
-                            st.dataframe(
-                                category_top3[['Category', 'Rank', 'Product', 'Brand', 'Qty', 'Revenue']],
-                                column_config={
-                                    "Category": st.column_config.TextColumn("項目"),
-                                    "Rank": st.column_config.NumberColumn("排名", format="%d"),
-                                    "Product": st.column_config.TextColumn("商品"),
-                                    "Brand": st.column_config.TextColumn("品牌"),
-                                    "Qty": st.column_config.NumberColumn("銷售件數", format="%d"),
-                                    "Revenue": st.column_config.NumberColumn("銷售營收", format="$%d"),
-                                },
-                                width="stretch",
-                                hide_index=True
-                            )
-
-                            top3_chart = alt.Chart(category_top3).mark_bar(cornerRadiusEnd=7).encode(
-                                x=alt.X('Revenue:Q', title='營收'),
-                                y=alt.Y('Product:N', sort='-x', title='商品'),
-                                color=alt.Color('Category:N', title='項目', scale=alt.Scale(scheme='set2')),
-                                row=alt.Row('Category:N', title=None, header=alt.Header(labelColor="#f8fafc", labelFontWeight="bold")),
-                                tooltip=[
-                                    alt.Tooltip('Category:N', title='項目'),
-                                    alt.Tooltip('Rank:Q', title='排名'),
-                                    alt.Tooltip('Product:N', title='商品'),
-                                    alt.Tooltip('Brand:N', title='品牌'),
-                                    alt.Tooltip('Qty:Q', title='件數'),
-                                    alt.Tooltip('Revenue:Q', title='營收', format=',')
-                                ]
-                            )
-                            st.altair_chart(style_chart(top3_chart, max(280, min(900, 170 * category_top3['Category'].nunique()))), width="stretch")
+                            category_cols = st.columns(3)
+                            for idx, (category, group) in enumerate(category_top3.groupby('Category', sort=True)):
+                                rows_html = ""
+                                for _, top_item in group.iterrows():
+                                    rows_html += (
+                                        "<div class='rank-row'>"
+                                        f"<div><span class='rank-badge'>{int(top_item['Rank'])}</span></div>"
+                                        f"<div><div class='rank-product'>{escape_html(top_item['Product'])}</div>"
+                                        f"<div class='rank-meta'>{escape_html(top_item['Brand'])}</div></div>"
+                                        f"<div class='rank-number'>{int(top_item['Qty']):,} 件</div>"
+                                        f"<div class='rank-number'>${int(top_item['Revenue']):,}</div>"
+                                        "</div>"
+                                    )
+                                with category_cols[idx % 3]:
+                                    st.markdown(
+                                        f"<div class='rank-panel'><div class='rank-panel-title'>{escape_html(category)}</div>{rows_html}</div>",
+                                        unsafe_allow_html=True
+                                    )
 
                         st.divider()
 
@@ -1510,28 +1554,33 @@ def main_app(user):
                                     )
                                     st.altair_chart(style_chart(dealer_summary_chart, 320), width="stretch")
 
-                            st.markdown("###### 各通路熱銷商品差異")
-                            dealer_product = dealer_compare_items.groupby(['Dealer', 'Product', 'Brand', 'Category'], as_index=False).agg(
-                                Qty=('Qty', 'sum'),
-                                Revenue=('Subtotal', 'sum')
-                            )
-                            dealer_product = dealer_product.sort_values(['Dealer', 'Revenue'], ascending=[True, False])
-                            dealer_product['Rank'] = dealer_product.groupby('Dealer')['Revenue'].rank(method='first', ascending=False).astype(int)
-                            dealer_product_top = dealer_product[dealer_product['Rank'] <= 8].copy()
-                            st.dataframe(
-                                dealer_product_top[['Dealer', 'Rank', 'Product', 'Brand', 'Category', 'Qty', 'Revenue']],
-                                column_config={
-                                    "Dealer": st.column_config.TextColumn("通路"),
-                                    "Rank": st.column_config.NumberColumn("排名", format="%d"),
-                                    "Product": st.column_config.TextColumn("商品"),
-                                    "Brand": st.column_config.TextColumn("品牌"),
-                                    "Category": st.column_config.TextColumn("分類"),
-                                    "Qty": st.column_config.NumberColumn("件數", format="%d"),
-                                    "Revenue": st.column_config.NumberColumn("營收", format="$%d"),
-                                },
-                                width="stretch",
-                                hide_index=True
-                            )
+                            with st.container(border=True):
+                                st.markdown("<div class='dashboard-card-title'>各通路熱銷商品差異</div><div class='dashboard-card-caption'>每間通路各自列出熱銷商品，避免通路名稱在表格中重複出現</div>", unsafe_allow_html=True)
+                                dealer_product = dealer_compare_items.groupby(['Dealer', 'Product', 'Brand', 'Category'], as_index=False).agg(
+                                    Qty=('Qty', 'sum'),
+                                    Revenue=('Subtotal', 'sum')
+                                )
+                                dealer_product = dealer_product.sort_values(['Dealer', 'Revenue'], ascending=[True, False])
+                                dealer_product['Rank'] = dealer_product.groupby('Dealer')['Revenue'].rank(method='first', ascending=False).astype(int)
+                                dealer_product_top = dealer_product[dealer_product['Rank'] <= 5].copy()
+                                dealer_cols = st.columns(2)
+                                for idx, (dealer, group) in enumerate(dealer_product_top.groupby('Dealer', sort=True)):
+                                    rows_html = ""
+                                    for _, top_item in group.iterrows():
+                                        rows_html += (
+                                            "<div class='rank-row'>"
+                                            f"<div><span class='rank-badge'>{int(top_item['Rank'])}</span></div>"
+                                            f"<div><div class='rank-product'>{escape_html(top_item['Product'])}</div>"
+                                            f"<div class='rank-meta'>{escape_html(top_item['Brand'])} / {escape_html(top_item['Category'])}</div></div>"
+                                            f"<div class='rank-number'>{int(top_item['Qty']):,} 件</div>"
+                                            f"<div class='rank-number'>${int(top_item['Revenue']):,}</div>"
+                                            "</div>"
+                                        )
+                                    with dealer_cols[idx % 2]:
+                                        st.markdown(
+                                            f"<div class='rank-panel'><div class='rank-panel-title'>{escape_html(dealer)}</div>{rows_html}</div>",
+                                            unsafe_allow_html=True
+                                        )
                         else:
                             st.caption("選擇至少一間通路後，就會顯示比較圖表。")
 
