@@ -2266,3 +2266,7 @@ def login_page():
                             st.error("帳號或密碼錯誤")
 
 if __name__ == "__main__":
+    if 'user' not in st.session_state:
+        login_page()
+    else:
+        main_app(st.session_state['user'])
