@@ -812,7 +812,14 @@ def main_app(user):
                             elif "已付款" in status_str: status_icon += "💰"
 
                             status_badges = display_status_badges(row['Status'])
-                            expander_title = f"{status_icon} {status_str} | {row['Customer_Name']} (${row['Total']})"
+                            order_time = pd.to_datetime(row.get('Order_Time', ''), errors='coerce')
+                            if pd.notna(order_time):
+                                order_date_text = order_time.strftime("%Y-%m-%d")
+                                order_time_text = order_time.strftime("%Y-%m-%d %H:%M")
+                            else:
+                                order_date_text = str(row.get('Order_Time', ''))
+                                order_time_text = str(row.get('Order_Time', ''))
+                            expander_title = f"{status_icon} {status_str} | {order_date_text} | {row['Customer_Name']} (${row['Total']})"
                             
                             with st.expander(expander_title):
                                 st.markdown(f"### 目前狀態: {status_badges}", unsafe_allow_html=True)
@@ -820,6 +827,7 @@ def main_app(user):
                                 c1, c2, c3 = st.columns([1.5, 2, 1])
                                 with c1:
                                     st.markdown(f"**訂單編號:** `{row['Order_ID']}`")
+                                    st.markdown(f"**採購日期:** {order_time_text}")
                                     st.markdown(f"**客戶:** {row['Customer_Name']}")
                                     st.markdown(f"**Email:** {row['Email']}")
                                 with c2:
@@ -1049,16 +1057,20 @@ def main_app(user):
 
         with tab4:
             st.subheader("📊 數據戰情室")
-            st.info("💡 這裡展示即時的銷售數據分析，協助您判斷通路價值與熱銷商品。")
+            st.info("💡 這裡展示即時的銷售數據分析，協助您判斷營收趨勢、通路價值、品牌結構與熱銷商品。")
             
             try:
                 orders = get_data("orders")
                 if orders.empty:
                     st.warning("目前沒有訂單數據可供分析。")
                 else:
-                    orders['Order_Date'] = pd.to_datetime(orders['Order_Time'])
+                    orders['Order_Date'] = pd.to_datetime(orders['Order_Time'], errors='coerce')
+                    orders = orders.dropna(subset=['Order_Date']).copy()
                     orders['Month'] = orders['Order_Date'].dt.strftime('%Y-%m')
+                    orders['Date'] = orders['Order_Date'].dt.strftime('%Y-%m-%d')
                     orders['Total'] = pd.to_numeric(orders['Total'], errors='coerce').fillna(0)
+                    orders['Subtotal'] = pd.to_numeric(orders.get('Subtotal', 0), errors='coerce').fillna(0)
+                    orders['Shipping'] = pd.to_numeric(orders.get('Shipping', 0), errors='coerce').fillna(0)
                     
                     df_prods = get_products_data()
                     prod_cat_map = {}
@@ -1075,6 +1087,7 @@ def main_app(user):
                                 all_items_list.append({
                                     'Order_ID': row['Order_ID'],
                                     'Dealer': row['Customer_Name'],
+                                    'Date': row['Order_Date'].strftime('%Y-%m-%d'),
                                     'Month': row['Order_Date'].strftime('%Y-%m'),
                                     'Brand': item.get('brand', 'Unknown'),
                                     'Product': item.get('name', 'Unknown'),
@@ -1089,88 +1102,308 @@ def main_app(user):
                     total_rev = int(orders['Total'].sum())
                     total_orders = len(orders)
                     avg_order_value = int(total_rev / total_orders) if total_orders > 0 else 0
+                    active_dealers = orders['Customer_Name'].nunique()
+                    total_qty = int(df_items['Qty'].sum()) if not df_items.empty and 'Qty' in df_items.columns else 0
                     
-                    k1, k2, k3 = st.columns(3)
+                    k1, k2, k3, k4, k5 = st.columns(5)
                     k1.metric("💰 總營業額 (Total Revenue)", f"${total_rev:,}")
                     k2.metric("📦 總訂單數 (Total Orders)", f"{total_orders}")
                     k3.metric("📈 平均客單價 (AOV)", f"${avg_order_value:,}")
+                    k4.metric("🏪 下單通路數", f"{active_dealers}")
+                    k5.metric("🧾 銷售件數", f"{total_qty:,}")
                     
                     st.divider()
 
                     c_chart1, c_chart2 = st.columns(2)
                     
                     with c_chart1:
-                        st.markdown("##### 🏆 經銷商貢獻度排行 (Top Dealers)")
-                        dealer_sales = orders.groupby('Customer_Name')['Total'].sum().sort_values(ascending=False).head(10)
-                        st.bar_chart(dealer_sales, color="#ff5500")
-                        st.caption("前 10 名貢獻營收最高的經銷商")
+                        st.markdown("##### 📅 每日營收趨勢")
+                        daily_sales = orders.groupby('Date', as_index=False).agg(
+                            Revenue=('Total', 'sum'),
+                            Orders=('Order_ID', 'count')
+                        )
+                        daily_chart = alt.Chart(daily_sales).mark_line(point=True).encode(
+                            x=alt.X('Date:T', title='日期'),
+                            y=alt.Y('Revenue:Q', title='營收'),
+                            tooltip=[
+                                alt.Tooltip('Date:T', title='日期'),
+                                alt.Tooltip('Revenue:Q', title='營收', format=','),
+                                alt.Tooltip('Orders:Q', title='訂單數')
+                            ]
+                        ).properties(height=320)
+                        st.altair_chart(daily_chart, width="stretch")
+                        st.caption("觀察短期銷售波動與活動影響")
 
                     with c_chart2:
-                        st.markdown("##### 📅 每月營收走勢 (Monthly Revenue)")
-                        monthly_sales = orders.groupby('Month')['Total'].sum()
-                        st.line_chart(monthly_sales, color="#3498db")
-                        st.caption("觀察銷售季節性變化")
+                        st.markdown("##### 📆 每月營收與訂單數")
+                        monthly_sales = orders.groupby('Month', as_index=False).agg(
+                            Revenue=('Total', 'sum'),
+                            Orders=('Order_ID', 'count')
+                        )
+                        monthly_base = alt.Chart(monthly_sales).encode(x=alt.X('Month:N', title='月份'))
+                        monthly_bar = monthly_base.mark_bar(color="#ff650f").encode(
+                            y=alt.Y('Revenue:Q', title='營收'),
+                            tooltip=[
+                                alt.Tooltip('Month:N', title='月份'),
+                                alt.Tooltip('Revenue:Q', title='營收', format=','),
+                                alt.Tooltip('Orders:Q', title='訂單數')
+                            ]
+                        )
+                        monthly_line = monthly_base.mark_line(point=True, color="#3aa0ff").encode(
+                            y=alt.Y('Orders:Q', title='訂單數')
+                        )
+                        st.altair_chart((monthly_bar + monthly_line).resolve_scale(y='independent').properties(height=320), width="stretch")
+                        st.caption("同時看營收與訂單量，避免只看金額誤判")
 
                     st.divider()
                     
-                    c_chart3, c_chart4 = st.columns(2)
+                    c_chart3, c_chart4, c_chart5 = st.columns(3)
                     
                     if not df_items.empty:
                         with c_chart3:
-                            st.markdown("##### 🏷️ 品牌銷售佔比 (Sales by Brand)")
-                            brand_sales_df = df_items.groupby('Brand')['Subtotal'].sum().reset_index()
-                            
-                            total_brand = brand_sales_df['Subtotal'].sum()
-                            brand_sales_df['Percentage_Num'] = (brand_sales_df['Subtotal'] / total_brand) * 100
-                            brand_sales_df['Percentage'] = brand_sales_df['Percentage_Num'].round(1).astype(str) + '%'
-                            brand_sales_df['Label'] = brand_sales_df.apply(lambda x: f"{x['Brand']} {x['Percentage']}" if x['Percentage_Num'] > 3 else "", axis=1)
-
-                            base_brand = alt.Chart(brand_sales_df).encode(
-                                theta=alt.Theta(field="Subtotal", type="quantitative", stack=True),
-                                color=alt.Color(field="Brand", type="nominal", legend=alt.Legend(title="品牌", orient="bottom")),
-                                tooltip=[alt.Tooltip("Brand", title="品牌"), alt.Tooltip("Subtotal", title="銷售總額"), alt.Tooltip("Percentage", title="佔比")]
-                            )
-                            pie_brand = base_brand.mark_arc(innerRadius=0, outerRadius=130)
-                            text_brand = base_brand.mark_text(size=12, fill="white", fontWeight="bold", radius=80).encode(text="Label:N")
-                            
-                            chart_brand = (pie_brand + text_brand).properties(height=350)
-                            st.altair_chart(chart_brand, width="stretch")
+                            st.markdown("##### 🏷️ 品牌營收排行")
+                            brand_sales_df = df_items.groupby('Brand', as_index=False).agg(
+                                Revenue=('Subtotal', 'sum'),
+                                Qty=('Qty', 'sum')
+                            ).sort_values('Revenue', ascending=False).head(12)
+                            brand_chart = alt.Chart(brand_sales_df).mark_bar(color="#ff650f").encode(
+                                x=alt.X('Revenue:Q', title='營收'),
+                                y=alt.Y('Brand:N', sort='-x', title='品牌'),
+                                tooltip=[
+                                    alt.Tooltip('Brand:N', title='品牌'),
+                                    alt.Tooltip('Revenue:Q', title='營收', format=','),
+                                    alt.Tooltip('Qty:Q', title='件數')
+                                ]
+                            ).properties(height=360)
+                            st.altair_chart(brand_chart, width="stretch")
 
                         with c_chart4:
-                            st.markdown("##### 📂 產品分類佔比 (Sales by Category)")
-                            cat_sales_df = df_items.groupby('Category')['Subtotal'].sum().reset_index()
-                            
-                            total_cat = cat_sales_df['Subtotal'].sum()
-                            cat_sales_df['Percentage_Num'] = (cat_sales_df['Subtotal'] / total_cat) * 100
-                            cat_sales_df['Percentage'] = cat_sales_df['Percentage_Num'].round(1).astype(str) + '%'
-                            cat_sales_df['Label'] = cat_sales_df.apply(lambda x: f"{x['Category']} {x['Percentage']}" if x['Percentage_Num'] > 3 else "", axis=1)
+                            st.markdown("##### 📂 分類營收排行")
+                            cat_sales_df = df_items.groupby('Category', as_index=False).agg(
+                                Revenue=('Subtotal', 'sum'),
+                                Qty=('Qty', 'sum')
+                            ).sort_values('Revenue', ascending=False).head(12)
+                            cat_chart = alt.Chart(cat_sales_df).mark_bar(color="#3aa0ff").encode(
+                                x=alt.X('Revenue:Q', title='營收'),
+                                y=alt.Y('Category:N', sort='-x', title='分類'),
+                                tooltip=[
+                                    alt.Tooltip('Category:N', title='分類'),
+                                    alt.Tooltip('Revenue:Q', title='營收', format=','),
+                                    alt.Tooltip('Qty:Q', title='件數')
+                                ]
+                            ).properties(height=360)
+                            st.altair_chart(cat_chart, width="stretch")
 
-                            base_cat = alt.Chart(cat_sales_df).encode(
-                                theta=alt.Theta(field="Subtotal", type="quantitative", stack=True),
-                                color=alt.Color(field="Category", type="nominal", legend=alt.Legend(title="分類", orient="bottom")),
-                                tooltip=[alt.Tooltip("Category", title="分類"), alt.Tooltip("Subtotal", title="銷售總額"), alt.Tooltip("Percentage", title="佔比")]
-                            )
-                            pie_cat = base_cat.mark_arc(innerRadius=70, outerRadius=130)
-                            text_cat = base_cat.mark_text(size=12, fill="white", fontWeight="bold", radius=100).encode(text="Label:N")
-                            
-                            chart_cat = (pie_cat + text_cat).properties(height=350)
-                            st.altair_chart(chart_cat, width="stretch")
+                        with c_chart5:
+                            st.markdown("##### 📌 訂單狀態分布")
+                            status_df = orders.groupby('Status', as_index=False).agg(
+                                Orders=('Order_ID', 'count'),
+                                Revenue=('Total', 'sum')
+                            ).sort_values('Orders', ascending=False)
+                            status_chart = alt.Chart(status_df).mark_bar(color="#5cc981").encode(
+                                x=alt.X('Orders:Q', title='訂單數'),
+                                y=alt.Y('Status:N', sort='-x', title='狀態'),
+                                tooltip=[
+                                    alt.Tooltip('Status:N', title='狀態'),
+                                    alt.Tooltip('Orders:Q', title='訂單數'),
+                                    alt.Tooltip('Revenue:Q', title='營收', format=',')
+                                ]
+                            ).properties(height=360)
+                            st.altair_chart(status_chart, width="stretch")
                     
                     st.divider()
-                    
-                    st.markdown("##### 🔥 熱銷商品 TOP 20")
+
                     if not df_items.empty:
-                        top_products = df_items.groupby(['Product', 'Brand', 'Category'])[['Qty', 'Subtotal']].sum().reset_index()
-                        top_products = top_products.sort_values('Subtotal', ascending=False).head(20)
-                        st.dataframe(
-                            top_products,
-                            column_config={
-                                "Subtotal": st.column_config.NumberColumn("銷售總額", format="$%d"),
-                                "Qty": st.column_config.NumberColumn("銷售數量"),
-                            },
-                            width="stretch",
-                            hide_index=True
+                        d1, d2 = st.columns(2)
+                        with d1:
+                            st.markdown("##### 🏆 通路營收貢獻 TOP 15")
+                            dealer_sales = orders.groupby('Customer_Name', as_index=False).agg(
+                                Revenue=('Total', 'sum'),
+                                Orders=('Order_ID', 'count')
+                            )
+                            dealer_sales['AOV'] = (dealer_sales['Revenue'] / dealer_sales['Orders']).round(0).astype(int)
+                            dealer_sales = dealer_sales.sort_values('Revenue', ascending=False).head(15)
+                            st.dataframe(
+                                dealer_sales,
+                                column_config={
+                                    "Customer_Name": st.column_config.TextColumn("通路"),
+                                    "Revenue": st.column_config.NumberColumn("營收", format="$%d"),
+                                    "Orders": st.column_config.NumberColumn("訂單數", format="%d"),
+                                    "AOV": st.column_config.NumberColumn("平均客單", format="$%d"),
+                                },
+                                width="stretch",
+                                hide_index=True
+                            )
+
+                        with d2:
+                            st.markdown("##### 🔁 品牌 x 月份營收熱度")
+                            brand_month = df_items.groupby(['Month', 'Brand'], as_index=False)['Subtotal'].sum()
+                            top_heat_brands = brand_month.groupby('Brand')['Subtotal'].sum().sort_values(ascending=False).head(8).index.tolist()
+                            brand_month = brand_month[brand_month['Brand'].isin(top_heat_brands)]
+                            heat_chart = alt.Chart(brand_month).mark_rect().encode(
+                                x=alt.X('Month:N', title='月份'),
+                                y=alt.Y('Brand:N', title='品牌'),
+                                color=alt.Color('Subtotal:Q', title='營收', scale=alt.Scale(scheme='oranges')),
+                                tooltip=[
+                                    alt.Tooltip('Month:N', title='月份'),
+                                    alt.Tooltip('Brand:N', title='品牌'),
+                                    alt.Tooltip('Subtotal:Q', title='營收', format=',')
+                                ]
+                            ).properties(height=330)
+                            st.altair_chart(heat_chart, width="stretch")
+
+                        st.divider()
+
+                        st.markdown("##### 🧭 通路比較分析")
+                        dealer_options = sorted(df_items['Dealer'].dropna().unique().tolist())
+                        default_dealers = (
+                            dealer_sales['Customer_Name'].head(4).tolist()
+                            if 'dealer_sales' in locals() and not dealer_sales.empty
+                            else dealer_options[:4]
                         )
+                        selected_dealers = st.multiselect(
+                            "選擇要比較的通路",
+                            dealer_options,
+                            default=[d for d in default_dealers if d in dealer_options],
+                            help="建議選 2 到 6 間，圖表會比較清楚。"
+                        )
+
+                        if selected_dealers:
+                            dealer_compare_items = df_items[df_items['Dealer'].isin(selected_dealers)].copy()
+                            dealer_compare_orders = orders[orders['Customer_Name'].isin(selected_dealers)].copy()
+
+                            dc1, dc2, dc3 = st.columns(3)
+                            with dc1:
+                                st.markdown("###### 通路品牌結構")
+                                dealer_brand = dealer_compare_items.groupby(['Dealer', 'Brand'], as_index=False).agg(
+                                    Revenue=('Subtotal', 'sum'),
+                                    Qty=('Qty', 'sum')
+                                )
+                                dealer_brand['Dealer_Total'] = dealer_brand.groupby('Dealer')['Revenue'].transform('sum')
+                                dealer_brand['Share'] = (dealer_brand['Revenue'] / dealer_brand['Dealer_Total']).fillna(0)
+                                top_compare_brands = dealer_brand.groupby('Brand')['Revenue'].sum().sort_values(ascending=False).head(8).index.tolist()
+                                dealer_brand_chart_data = dealer_brand[dealer_brand['Brand'].isin(top_compare_brands)]
+                                dealer_brand_chart = alt.Chart(dealer_brand_chart_data).mark_bar().encode(
+                                    x=alt.X('Share:Q', title='佔比', axis=alt.Axis(format='%')),
+                                    y=alt.Y('Dealer:N', title='通路'),
+                                    color=alt.Color('Brand:N', title='品牌'),
+                                    tooltip=[
+                                        alt.Tooltip('Dealer:N', title='通路'),
+                                        alt.Tooltip('Brand:N', title='品牌'),
+                                        alt.Tooltip('Revenue:Q', title='營收', format=','),
+                                        alt.Tooltip('Share:Q', title='佔比', format='.1%'),
+                                        alt.Tooltip('Qty:Q', title='件數')
+                                    ]
+                                ).properties(height=320)
+                                st.altair_chart(dealer_brand_chart, width="stretch")
+
+                            with dc2:
+                                st.markdown("###### 通路分類結構")
+                                dealer_cat = dealer_compare_items.groupby(['Dealer', 'Category'], as_index=False).agg(
+                                    Revenue=('Subtotal', 'sum'),
+                                    Qty=('Qty', 'sum')
+                                )
+                                dealer_cat['Dealer_Total'] = dealer_cat.groupby('Dealer')['Revenue'].transform('sum')
+                                dealer_cat['Share'] = (dealer_cat['Revenue'] / dealer_cat['Dealer_Total']).fillna(0)
+                                top_compare_cats = dealer_cat.groupby('Category')['Revenue'].sum().sort_values(ascending=False).head(8).index.tolist()
+                                dealer_cat_chart_data = dealer_cat[dealer_cat['Category'].isin(top_compare_cats)]
+                                dealer_cat_chart = alt.Chart(dealer_cat_chart_data).mark_bar().encode(
+                                    x=alt.X('Share:Q', title='佔比', axis=alt.Axis(format='%')),
+                                    y=alt.Y('Dealer:N', title='通路'),
+                                    color=alt.Color('Category:N', title='分類'),
+                                    tooltip=[
+                                        alt.Tooltip('Dealer:N', title='通路'),
+                                        alt.Tooltip('Category:N', title='分類'),
+                                        alt.Tooltip('Revenue:Q', title='營收', format=','),
+                                        alt.Tooltip('Share:Q', title='佔比', format='.1%'),
+                                        alt.Tooltip('Qty:Q', title='件數')
+                                    ]
+                                ).properties(height=320)
+                                st.altair_chart(dealer_cat_chart, width="stretch")
+
+                            with dc3:
+                                st.markdown("###### 通路規模比較")
+                                dealer_summary = dealer_compare_orders.groupby('Customer_Name', as_index=False).agg(
+                                    Revenue=('Total', 'sum'),
+                                    Orders=('Order_ID', 'count')
+                                )
+                                dealer_qty = dealer_compare_items.groupby('Dealer', as_index=False)['Qty'].sum()
+                                dealer_summary = dealer_summary.merge(dealer_qty, left_on='Customer_Name', right_on='Dealer', how='left')
+                                dealer_summary['Qty'] = dealer_summary['Qty'].fillna(0).astype(int)
+                                dealer_summary['AOV'] = (dealer_summary['Revenue'] / dealer_summary['Orders']).round(0).astype(int)
+                                dealer_summary_chart = alt.Chart(dealer_summary).mark_circle(size=180).encode(
+                                    x=alt.X('Orders:Q', title='訂單數'),
+                                    y=alt.Y('Revenue:Q', title='營收'),
+                                    size=alt.Size('Qty:Q', title='件數'),
+                                    color=alt.Color('Customer_Name:N', title='通路'),
+                                    tooltip=[
+                                        alt.Tooltip('Customer_Name:N', title='通路'),
+                                        alt.Tooltip('Revenue:Q', title='營收', format=','),
+                                        alt.Tooltip('Orders:Q', title='訂單數'),
+                                        alt.Tooltip('Qty:Q', title='件數'),
+                                        alt.Tooltip('AOV:Q', title='平均客單', format=',')
+                                    ]
+                                ).properties(height=320)
+                                st.altair_chart(dealer_summary_chart, width="stretch")
+
+                            st.markdown("###### 各通路熱銷商品差異")
+                            dealer_product = dealer_compare_items.groupby(['Dealer', 'Product', 'Brand', 'Category'], as_index=False).agg(
+                                Qty=('Qty', 'sum'),
+                                Revenue=('Subtotal', 'sum')
+                            )
+                            dealer_product = dealer_product.sort_values(['Dealer', 'Revenue'], ascending=[True, False])
+                            dealer_product['Rank'] = dealer_product.groupby('Dealer')['Revenue'].rank(method='first', ascending=False).astype(int)
+                            dealer_product_top = dealer_product[dealer_product['Rank'] <= 8].copy()
+                            st.dataframe(
+                                dealer_product_top[['Dealer', 'Rank', 'Product', 'Brand', 'Category', 'Qty', 'Revenue']],
+                                column_config={
+                                    "Dealer": st.column_config.TextColumn("通路"),
+                                    "Rank": st.column_config.NumberColumn("排名", format="%d"),
+                                    "Product": st.column_config.TextColumn("商品"),
+                                    "Brand": st.column_config.TextColumn("品牌"),
+                                    "Category": st.column_config.TextColumn("分類"),
+                                    "Qty": st.column_config.NumberColumn("件數", format="%d"),
+                                    "Revenue": st.column_config.NumberColumn("營收", format="$%d"),
+                                },
+                                width="stretch",
+                                hide_index=True
+                            )
+                        else:
+                            st.caption("選擇至少一間通路後，就會顯示比較圖表。")
+
+                        st.divider()
+                        p1, p2 = st.columns(2)
+                        top_products = df_items.groupby(['Product', 'Brand', 'Category'])[['Qty', 'Subtotal']].sum().reset_index()
+                        with p1:
+                            st.markdown("##### 🔥 熱銷商品 TOP 20 / 營收")
+                            top_by_revenue = top_products.sort_values('Subtotal', ascending=False).head(20)
+                            st.dataframe(
+                                top_by_revenue,
+                                column_config={
+                                    "Product": st.column_config.TextColumn("商品"),
+                                    "Brand": st.column_config.TextColumn("品牌"),
+                                    "Category": st.column_config.TextColumn("分類"),
+                                    "Subtotal": st.column_config.NumberColumn("銷售總額", format="$%d"),
+                                    "Qty": st.column_config.NumberColumn("銷售數量"),
+                                },
+                                width="stretch",
+                                hide_index=True
+                            )
+                        with p2:
+                            st.markdown("##### 📦 熱銷商品 TOP 20 / 件數")
+                            top_by_qty = top_products.sort_values('Qty', ascending=False).head(20)
+                            st.dataframe(
+                                top_by_qty,
+                                column_config={
+                                    "Product": st.column_config.TextColumn("商品"),
+                                    "Brand": st.column_config.TextColumn("品牌"),
+                                    "Category": st.column_config.TextColumn("分類"),
+                                    "Subtotal": st.column_config.NumberColumn("銷售總額", format="$%d"),
+                                    "Qty": st.column_config.NumberColumn("銷售數量"),
+                                },
+                                width="stretch",
+                                hide_index=True
+                            )
                     else:
                         st.info("尚無商品銷售細節數據")
 
