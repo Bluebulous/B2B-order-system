@@ -392,6 +392,74 @@ def main_app(user):
         st.session_state.current_product_name = product_name
         st.session_state.product_picker_version += 1
 
+    def calculate_cart_totals(extra_discount=0):
+        BRAND_RULES, _ = get_brand_rules()
+        for item in st.session_state.cart.values():
+            if 'brand' not in item: item['brand'] = "default"
+            if 'wholesale_price' not in item: item['wholesale_price'] = item.get('Wholesale_Price', 0)
+            if 'retail_price' not in item: item['retail_price'] = item.get('Retail_Price', 0)
+
+        brand_groups = {}
+        for item in st.session_state.cart.values():
+            b_name = item['brand']
+            if b_name not in brand_groups:
+                brand_groups[b_name] = {'items': [], 'raw_wholesale_total': 0, 'is_wholesale_qualified': False, 'is_shipping_qualified': False}
+            brand_groups[b_name]['items'].append(item)
+            brand_groups[b_name]['raw_wholesale_total'] += int(round(item['wholesale_price'] * item['qty']))
+
+        is_order_free_shipping = False
+        grand_total_subtotal = 0
+        grand_total_tax = 0
+
+        for b_name, data in brand_groups.items():
+            safe_default = {"wholesale_threshold": 10000, "shipping_threshold": 10000, "discount_rate": 0.7}
+            rule = BRAND_RULES.get(b_name, BRAND_RULES.get("default", safe_default))
+            d_rate = rule.get('discount_rate', 0.7)
+            w_threshold = rule.get('wholesale_threshold', 10000)
+            s_threshold = rule.get('shipping_threshold', 10000)
+
+            if data['raw_wholesale_total'] >= w_threshold:
+                data['is_wholesale_qualified'] = True
+                brand_subtotal = data['raw_wholesale_total']
+                brand_tax = int(round(brand_subtotal * TAX_RATE))
+            else:
+                data['is_wholesale_qualified'] = False
+                brand_subtotal = 0
+                brand_tax = 0
+                for item in data['items']:
+                    brand_subtotal += int(round(item['retail_price'] * d_rate)) * item['qty']
+
+            if data['raw_wholesale_total'] >= s_threshold:
+                data['is_shipping_qualified'] = True
+                is_order_free_shipping = True
+
+            grand_total_subtotal += brand_subtotal
+            grand_total_tax += brand_tax
+            for item in data['items']:
+                if data['is_wholesale_qualified']:
+                    item['final_unit_price'] = item['wholesale_price']
+                else:
+                    item['final_unit_price'] = int(round(item['retail_price'] * d_rate))
+                item['final_subtotal'] = item['final_unit_price'] * item['qty']
+
+        if is_order_free_shipping:
+            shipping = 0
+            shipping_msg = "符合免運資格"
+        else:
+            shipping = SHIPPING_FEE
+            shipping_msg = f"運費 ${SHIPPING_FEE}"
+
+        grand_total = grand_total_subtotal + grand_total_tax + shipping - extra_discount
+        return {
+            "brand_groups": brand_groups,
+            "is_order_free_shipping": is_order_free_shipping,
+            "grand_total_subtotal": int(grand_total_subtotal),
+            "grand_total_tax": int(grand_total_tax),
+            "shipping": int(shipping),
+            "shipping_msg": shipping_msg,
+            "grand_total": int(grand_total),
+        }
+
     announcement = get_announcement()
     if announcement and announcement.strip() != "":
         st.info(f"📢 **公告：** {announcement}", icon="📢")
@@ -450,8 +518,7 @@ def main_app(user):
             total_qty = sum(item['qty'] for item in st.session_state.cart.values())
             total_skus = len(st.session_state.cart)
             st.info(f"🛒 購物車內有 {total_skus} 個 SKU / {total_qty} 件商品")
-            if st.button("前往結帳 (查看詳情)", type="primary", width="stretch"):
-                 st.toast("請往下滑動查看完整購物車", icon="👇")
+            st.caption("明細與結帳按鈕在右側購物車")
         else:
             st.caption("🛒 購物車是空的")
             
@@ -482,6 +549,121 @@ def main_app(user):
         if st.button("登出", key="logout", width="stretch"):
             st.session_state.clear()
             st.rerun()
+
+    # 0. 送出前確認頁
+    if st.session_state.page == 'checkout_review':
+        st.title("確認採購明細")
+        if not st.session_state.cart:
+            st.warning("購物車是空的，請先加入商品。")
+            if st.button("返回採購", type="primary"):
+                st.session_state.page = 'shop'
+                st.rerun()
+            return
+
+        contact_email_input = st.session_state.get('checkout_contact_email', '')
+        if not contact_email_input:
+            contact_email_input = str(user.get('Contact_Email', '')).replace('nan', '')
+        if not contact_email_input and "@" in str(user.get('Username', '')):
+            contact_email_input = user['Username']
+
+        totals = calculate_cart_totals(extra_discount=0)
+        review_rows = []
+        for item in st.session_state.cart.values():
+            review_rows.append({
+                "商品": item.get('name', ''),
+                "規格": item.get('spec', ''),
+                "品牌": item.get('brand', ''),
+                "數量": int(item.get('qty', 0)),
+                "單價": int(item.get('final_unit_price', 0)),
+                "小計": int(item.get('final_subtotal', 0)),
+            })
+
+        with st.container(border=True):
+            st.markdown("<div class='cart-title'>訂單內容</div>", unsafe_allow_html=True)
+            st.caption(f"接收訂單通知 Email：{contact_email_input}")
+            st.dataframe(
+                pd.DataFrame(review_rows),
+                width="stretch",
+                hide_index=True,
+                column_config={
+                    "數量": st.column_config.NumberColumn("數量", format="%d"),
+                    "單價": st.column_config.NumberColumn("單價", format="$%d"),
+                    "小計": st.column_config.NumberColumn("小計", format="$%d"),
+                }
+            )
+
+        with st.container(border=True):
+            summary_rows = [
+                ("小計 Subtotal", f"${totals['grand_total_subtotal']:,}"),
+                ("稅金 Tax", f"${totals['grand_total_tax']:,}"),
+                ("運費 Shipping", totals['shipping_msg']),
+            ]
+            summary_html = "<div class='cart-total-box'>"
+            for label, value in summary_rows:
+                summary_html += f"<div class='cart-total-row'><span>{escape_html(label)}</span><span>{escape_html(value)}</span></div>"
+            summary_html += f"<div class='cart-total-row final'><span>總計含稅</span><span>${totals['grand_total']:,}</span></div></div>"
+            st.markdown(summary_html, unsafe_allow_html=True)
+
+        back_col, submit_col = st.columns([1, 2])
+        with back_col:
+            if st.button("返回修改", width="stretch"):
+                st.session_state.page = 'shop'
+                st.rerun()
+        with submit_col:
+            if st.button("確認送出訂單", type="primary", width="stretch"):
+                order_id = f"ORD-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+                c_name = user.get('Dealer_Name', '')
+                c_email = contact_email_input
+                c_phone = user.get('Phone', '')
+
+                c_name = "" if pd.isna(c_name) else str(c_name)
+                c_email = "" if pd.isna(c_email) else str(c_email)
+                c_phone = "" if pd.isna(c_phone) else str(c_phone)
+
+                try:
+                    if c_email != str(user.get('Contact_Email', '')):
+                        if update_data_by_id("users", "Username", user['Username'], {"Contact_Email": c_email}):
+                            st.session_state['user']['Contact_Email'] = c_email
+                except: pass
+
+                final_cart_data = st.session_state.cart.copy()
+                order_data = {
+                    "Order_ID": order_id,
+                    "Order_Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "Customer_Name": c_name,
+                    "Email": c_email,
+                    "Phone": c_phone,
+                    "Items_Json": final_cart_data,
+                    "Subtotal": int(totals['grand_total_subtotal']),
+                    "Tax": int(totals['grand_total_tax']),
+                    "Shipping": int(totals['shipping']),
+                    "Total": int(totals['grand_total']),
+                    "Status": "待處理",
+                    "Extra_Discount": 0,
+                    "Tracking_Number": "",
+                    "Admin_Note": ""
+                }
+
+                try:
+                    if insert_data("orders", order_data):
+                        log_system_event(user, "Checkout", f"Order ID: {order_id}")
+                        st.success(f"訂單 {order_id} 已送出!")
+                        with st.spinner("正在寄送確認信..."):
+                            if send_order_email(order_data, final_cart_data):
+                                st.toast("📧 確認信已寄出！", icon="✅")
+                            else:
+                                st.warning("訂單已成立，但信件寄送失敗")
+                        st.session_state.cart = {}
+                        st.session_state.has_logged_cart_start = False
+                        st.session_state.checkout_contact_email = ""
+                        time.sleep(1)
+                        st.session_state.page = 'shop'
+                        st.rerun()
+                    else:
+                        st.error("新增訂單至資料庫失敗")
+                except Exception as e:
+                    st.error(f"訂單處理失敗: {e}")
+        return
 
     # 1. 歷史訂單頁
     if st.session_state.page == 'history':
@@ -1369,11 +1551,16 @@ def main_app(user):
                         default_checkout_email = user['Username']
                     
                     contact_email_input = st.text_input("📧 接收訂單通知 Email (必填)", value=default_checkout_email, help="訂單確認信將寄送至此信箱")
-                    btn_text = "CHECKOUT / 送出訂單"
+                    btn_text = "前往確認採購明細"
 
                 disable_btn = (not is_editing) and (not contact_email_input)
                 
                 if st.button(btn_text, type="primary", width="stretch", disabled=disable_btn):
+                    if not is_editing:
+                        st.session_state.checkout_contact_email = contact_email_input
+                        st.session_state.page = 'checkout_review'
+                        st.rerun()
+
                     if is_editing:
                         order_id = st.session_state.editing_order_id
                         saved_info = st.session_state.get('editing_customer_info', {})
