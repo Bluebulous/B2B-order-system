@@ -34,25 +34,30 @@ st.markdown(
 <style>
     /* 1. 全站深色背景 */
     .stApp {
-        background-color: #1e1e1e;
+        background-color: #171717;
         color: #ffffff;
     }
     
     /* 2. Header 設定 */
     header[data-testid="stHeader"] {
-        background-color: #1e1e1e;
+        background-color: #171717;
         color: white;
     }
     
-    /* 3. 白色卡片容器 */
+    .block-container {
+        max-width: 1540px;
+        padding-top: 2rem;
+    }
+
+    /* 3. 深色卡片容器 */
     div[data-testid="stVerticalBlockBorderWrapper"] {
-        background-color: #ffffff;
-        border: 1px solid #e0e0e0;
+        background-color: #202020;
+        border: 1px solid #3a3a3a;
         border-radius: 8px;
-        padding: 20px;
+        padding: 18px;
     }
     
-    /* 4. 強制白色卡片內的文字為黑色 */
+    /* 4. 深色卡片內文字 */
     div[data-testid="stVerticalBlockBorderWrapper"] p,
     div[data-testid="stVerticalBlockBorderWrapper"] h1,
     div[data-testid="stVerticalBlockBorderWrapper"] h2,
@@ -61,7 +66,7 @@ st.markdown(
     div[data-testid="stVerticalBlockBorderWrapper"] div,
     div[data-testid="stVerticalBlockBorderWrapper"] label,
     div[data-testid="stVerticalBlockBorderWrapper"] li {
-        color: #000000 !important;
+        color: #f4f4f4 !important;
     }
 
     /* 5. Selectbox & Input 樣式 */
@@ -104,7 +109,7 @@ st.markdown(
     }
 
     div[data-testid="stVerticalBlockBorderWrapper"] button[kind="secondary"] p {
-        color: #000000 !important;          
+        color: #f4f4f4 !important;
         font-weight: bold !important;
         font-size: 13px !important;
         margin: 0px !important;
@@ -116,7 +121,7 @@ st.markdown(
 
     div[data-testid="stVerticalBlockBorderWrapper"] button[kind="secondary"]:hover {
         color: #ff5000 !important;          
-        background-color: #f0f0f0 !important; 
+        background-color: #2c2c2c !important;
         border: 1px solid #ff5000 !important;
     }
     div[data-testid="stVerticalBlockBorderWrapper"] button[kind="secondary"]:hover p {
@@ -178,21 +183,33 @@ st.markdown(
     }
 
     /* === 桌面採購篩選欄位 === */
-    section[data-testid="stSidebar"] div[data-testid="stTextInput"] input {
+    div[data-testid="stTextInput"] input {
         color: #111111 !important;
         caret-color: #111111 !important;
         background-color: #f8fafc !important;
     }
-    section[data-testid="stSidebar"] div[data-testid="stTextInput"] input::placeholder {
+    div[data-testid="stTextInput"] input::placeholder {
         color: #6b7280 !important;
         opacity: 1 !important;
     }
-    section[data-testid="stSidebar"] div[data-baseweb="select"] > div {
+    div[data-baseweb="select"] > div {
         background-color: #f8fafc !important;
         color: #111111 !important;
     }
 
     /* === 桌面採購工作台視覺 === */
+    .shop-toolbar-title {
+        color: #ffffff !important;
+        font-size: 19px;
+        font-weight: 850;
+        margin: 0 0 4px 0;
+    }
+    .shop-toolbar-meta {
+        color: #a7a7a7 !important;
+        font-size: 13px;
+        font-weight: 700;
+        margin-bottom: 10px;
+    }
     .product-title {
         color: #f7f7f7 !important;
         font-size: 22px;
@@ -316,7 +333,7 @@ st.markdown(
     }
     .cart-item-name {
         color: #f4f4f4 !important;
-        font-size: 13px;
+        font-size: 12px;
         font-weight: 800;
         line-height: 1.18;
         letter-spacing: 0;
@@ -466,44 +483,6 @@ def main_app(user):
             st.session_state.clear()
             st.rerun()
 
-        if st.session_state.page == 'shop':
-            st.divider()
-            st.markdown('<div class="nav-section-title">FOR DOGS</div>', unsafe_allow_html=True)
-            categories = sorted(df_products['Category'].dropna().unique().tolist())
-            selected_cat = st.radio("Category", categories, label_visibility="collapsed")
-
-            search_query = st.text_input("搜尋商品", placeholder="輸入品名、品牌、顏色或尺寸", key="shop_search")
-            if search_query.strip():
-                query = search_query.strip().lower()
-                df_filtered = df_products.copy()
-                searchable_cols = [col for col in ['Name', 'Brand', 'Color', 'Size', 'Category'] if col in df_filtered.columns]
-                search_mask = pd.Series(False, index=df_filtered.index)
-                for col in searchable_cols:
-                    search_mask = search_mask | df_filtered[col].astype(str).str.lower().str.contains(query, na=False)
-                df_filtered = df_filtered[search_mask]
-                st.caption("搜尋會跨所有項目，不受上方分類限制")
-            else:
-                df_filtered = df_products[df_products['Category'] == selected_cat].copy()
-
-            product_list = sorted(df_filtered['Name'].dropna().unique().tolist())
-            shop_product_scope = df_filtered
-            if product_list:
-                if st.session_state.current_product_name not in product_list:
-                    st.session_state.current_product_name = product_list[0]
-                selected_product = st.selectbox(
-                    "快速選擇商品",
-                    product_list,
-                    index=product_list.index(st.session_state.current_product_name),
-                    key=f"shop_product_picker_{st.session_state.product_picker_version}",
-                )
-                if selected_product != st.session_state.current_product_name:
-                    set_current_product(selected_product)
-                    st.rerun()
-                scope_label = "搜尋結果" if search_query.strip() else selected_cat
-                st.caption(f"{scope_label}：{len(product_list)} 款商品 / {len(df_filtered)} 個 SKU")
-            else:
-                st.warning("沒有符合篩選條件的商品")
-    
     # 1. 歷史訂單頁
     if st.session_state.page == 'history':
         st.title("歷史訂單")
@@ -1070,11 +1049,67 @@ def main_app(user):
         return
 
     # 3. 商店頁
+    categories = sorted(df_products['Category'].dropna().unique().tolist())
+    current_category_value = df_products[df_products['Name'] == st.session_state.current_product_name]['Category']
+    default_category = current_category_value.iloc[0] if not current_category_value.empty else categories[0]
+    if 'shop_selected_category' not in st.session_state or st.session_state.shop_selected_category not in categories:
+        st.session_state.shop_selected_category = default_category
+
+    with st.container(border=True):
+        st.markdown("<div class='shop-toolbar-title'>採購工作台</div>", unsafe_allow_html=True)
+        st.markdown("<div class='shop-toolbar-meta'>先選項目縮小範圍，也可以直接搜尋品名、品牌、顏色或尺寸。</div>", unsafe_allow_html=True)
+        f_cat, f_search, f_product = st.columns([1.1, 1.5, 1.8], vertical_alignment="bottom")
+
+        with f_cat:
+            selected_cat = st.selectbox(
+                "項目",
+                categories,
+                index=categories.index(st.session_state.shop_selected_category),
+                key="shop_selected_category",
+            )
+
+        with f_search:
+            search_query = st.text_input("搜尋商品", placeholder="輸入品名、品牌、顏色或尺寸", key="shop_search")
+
+        if search_query.strip():
+            query = search_query.strip().lower()
+            df_filtered = df_products.copy()
+            searchable_cols = [col for col in ['Name', 'Brand', 'Color', 'Size', 'Category'] if col in df_filtered.columns]
+            search_mask = pd.Series(False, index=df_filtered.index)
+            for col in searchable_cols:
+                search_mask = search_mask | df_filtered[col].astype(str).str.lower().str.contains(query, na=False)
+            df_filtered = df_filtered[search_mask]
+            scope_label = "搜尋結果"
+        else:
+            df_filtered = df_products[df_products['Category'] == selected_cat].copy()
+            scope_label = selected_cat
+
+        product_list = sorted(df_filtered['Name'].dropna().unique().tolist())
+        shop_product_scope = df_filtered
+
+        with f_product:
+            if product_list:
+                if st.session_state.current_product_name not in product_list:
+                    st.session_state.current_product_name = product_list[0]
+                selected_product = st.selectbox(
+                    "快速選擇商品",
+                    product_list,
+                    index=product_list.index(st.session_state.current_product_name),
+                    key=f"shop_product_picker_{st.session_state.product_picker_version}",
+                )
+                if selected_product != st.session_state.current_product_name:
+                    set_current_product(selected_product)
+                    st.rerun()
+            else:
+                st.selectbox("快速選擇商品", ["沒有符合條件的商品"], disabled=True)
+
+        st.caption(f"{scope_label}：{len(product_list)} 款商品 / {len(df_filtered)} 個 SKU")
+
     if shop_product_scope.empty:
-        st.warning("目前沒有符合篩選條件的商品，請調整左側搜尋或篩選。")
+        st.warning("目前沒有符合篩選條件的商品，請調整上方搜尋或項目。")
         return
 
-    col_visual, col_select, col_cart = st.columns([1.5, 1.5, 2.0], gap="medium")
+    col_visual, col_select, col_cart = st.columns([1.35, 1.45, 2.0], gap="medium")
     current_name = st.session_state.current_product_name
     current_product_data = df_products[df_products['Name'] == current_name]
 
@@ -1253,7 +1288,7 @@ def main_app(user):
                         )
 
                     for item in data['items']:
-                        c_name, c_qty, c_del, c_price = st.columns([2.05, 1.85, 0.55, 1.0], vertical_alignment="center")
+                        c_name, c_qty, c_del, c_price = st.columns([2.05, 1.9, 0.7, 0.85], vertical_alignment="center")
                         
                         with c_name:
                             st.markdown(f"<div class='cart-item-name'>{escape_html(item.get('name', ''))}</div><div class='cart-item-spec'>{escape_html(item.get('spec', ''))}</div>", unsafe_allow_html=True)
