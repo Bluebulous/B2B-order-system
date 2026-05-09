@@ -1172,6 +1172,7 @@ def main_app(user):
                     orders = orders.dropna(subset=['Order_Date']).copy()
                     orders['Month'] = orders['Order_Date'].dt.strftime('%Y-%m')
                     orders['Date'] = orders['Order_Date'].dt.strftime('%Y-%m-%d')
+                    orders['Week_Start'] = orders['Order_Date'].dt.to_period('W-MON').apply(lambda r: r.start_time)
                     orders['Total'] = pd.to_numeric(orders['Total'], errors='coerce').fillna(0)
                     orders['Subtotal'] = pd.to_numeric(orders.get('Subtotal', 0), errors='coerce').fillna(0)
                     orders['Shipping'] = pd.to_numeric(orders.get('Shipping', 0), errors='coerce').fillna(0)
@@ -1193,6 +1194,7 @@ def main_app(user):
                                     'Dealer': row['Customer_Name'],
                                     'Date': row['Order_Date'].strftime('%Y-%m-%d'),
                                     'Month': row['Order_Date'].strftime('%Y-%m'),
+                                    'Week_Start': row['Order_Date'].to_period('W-MON').start_time,
                                     'Brand': item.get('brand', 'Unknown'),
                                     'Product': item.get('name', 'Unknown'),
                                     'Category': c_cat,
@@ -1236,32 +1238,32 @@ def main_app(user):
                     
                     with c_chart1:
                         with st.container(border=True):
-                            st.markdown("<div class='dashboard-card-title'>每日營收趨勢</div><div class='dashboard-card-caption'>觀察短期銷售波動與活動影響</div>", unsafe_allow_html=True)
-                            daily_sales = orders.groupby('Date', as_index=False).agg(
+                            st.markdown("<div class='dashboard-card-title'>每週營收趨勢</div><div class='dashboard-card-caption'>以週為單位觀察營收與訂單量變化</div>", unsafe_allow_html=True)
+                            weekly_sales = orders.groupby('Week_Start', as_index=False).agg(
                                 Revenue=('Total', 'sum'),
                                 Orders=('Order_ID', 'count')
                             )
-                            daily_base = alt.Chart(daily_sales).encode(
-                                x=alt.X('Date:T', title='日期'),
+                            weekly_base = alt.Chart(weekly_sales).encode(
+                                x=alt.X('Week_Start:T', title='週起始日'),
                                 y=alt.Y('Revenue:Q', title='營收'),
                                 tooltip=[
-                                    alt.Tooltip('Date:T', title='日期'),
+                                    alt.Tooltip('Week_Start:T', title='週起始日'),
                                     alt.Tooltip('Revenue:Q', title='營收', format=','),
                                     alt.Tooltip('Orders:Q', title='訂單數')
                                 ]
                             )
-                            daily_area = daily_base.mark_area(
+                            weekly_area = weekly_base.mark_area(
                                 color="#38d996",
                                 opacity=0.18,
                                 interpolate="monotone",
                             )
-                            daily_line = daily_base.mark_line(
+                            weekly_line = weekly_base.mark_line(
                                 color="#7cf0b2",
                                 strokeWidth=3,
                                 interpolate="monotone",
                             )
-                            daily_points = daily_base.mark_circle(color="#d9ff74", size=55)
-                            st.altair_chart(style_chart(daily_area + daily_line + daily_points, 320), width="stretch")
+                            weekly_points = weekly_base.mark_circle(color="#d9ff74", size=55)
+                            st.altair_chart(style_chart(weekly_area + weekly_line + weekly_points, 320), width="stretch")
 
                     with c_chart2:
                         with st.container(border=True):
@@ -1287,7 +1289,7 @@ def main_app(user):
 
                     st.divider()
                     
-                    c_chart3, c_chart4, c_chart5 = st.columns(3)
+                    c_chart3, c_chart4 = st.columns(2)
                     
                     if not df_items.empty:
                         with c_chart3:
@@ -1326,24 +1328,6 @@ def main_app(user):
                                 )
                                 st.altair_chart(style_chart(cat_chart, 360), width="stretch")
 
-                        with c_chart5:
-                            with st.container(border=True):
-                                st.markdown("<div class='dashboard-card-title'>訂單狀態分布</div><div class='dashboard-card-caption'>掌握處理中、出貨與付款狀態</div>", unsafe_allow_html=True)
-                                status_df = orders.groupby('Status', as_index=False).agg(
-                                    Orders=('Order_ID', 'count'),
-                                    Revenue=('Total', 'sum')
-                                ).sort_values('Orders', ascending=False)
-                                status_chart = alt.Chart(status_df).mark_bar(color="#7cf0b2", cornerRadiusEnd=8).encode(
-                                    x=alt.X('Orders:Q', title='訂單數'),
-                                    y=alt.Y('Status:N', sort='-x', title='狀態'),
-                                    tooltip=[
-                                        alt.Tooltip('Status:N', title='狀態'),
-                                        alt.Tooltip('Orders:Q', title='訂單數'),
-                                        alt.Tooltip('Revenue:Q', title='營收', format=',')
-                                    ]
-                                )
-                                st.altair_chart(style_chart(status_chart, 360), width="stretch")
-                    
                     st.divider()
 
                     if not df_items.empty:
@@ -1386,6 +1370,48 @@ def main_app(user):
                                     ]
                                 )
                                 st.altair_chart(style_chart(heat_chart, 330), width="stretch")
+
+                        st.divider()
+
+                        with st.container(border=True):
+                            st.markdown("<div class='dashboard-card-title'>各項目銷售 TOP 3</div><div class='dashboard-card-caption'>每個項目內部各自排名，適合看 NSD 胸背帶、雨衣、保健品等項目的主力商品</div>", unsafe_allow_html=True)
+                            category_product_rank = df_items.groupby(['Category', 'Product', 'Brand'], as_index=False).agg(
+                                Qty=('Qty', 'sum'),
+                                Revenue=('Subtotal', 'sum')
+                            )
+                            category_product_rank = category_product_rank.sort_values(['Category', 'Revenue', 'Qty'], ascending=[True, False, False])
+                            category_product_rank['Rank'] = category_product_rank.groupby('Category')['Revenue'].rank(method='first', ascending=False).astype(int)
+                            category_top3 = category_product_rank[category_product_rank['Rank'] <= 3].copy()
+                            category_top3 = category_top3.sort_values(['Category', 'Rank'])
+                            st.dataframe(
+                                category_top3[['Category', 'Rank', 'Product', 'Brand', 'Qty', 'Revenue']],
+                                column_config={
+                                    "Category": st.column_config.TextColumn("項目"),
+                                    "Rank": st.column_config.NumberColumn("排名", format="%d"),
+                                    "Product": st.column_config.TextColumn("商品"),
+                                    "Brand": st.column_config.TextColumn("品牌"),
+                                    "Qty": st.column_config.NumberColumn("銷售件數", format="%d"),
+                                    "Revenue": st.column_config.NumberColumn("銷售營收", format="$%d"),
+                                },
+                                width="stretch",
+                                hide_index=True
+                            )
+
+                            top3_chart = alt.Chart(category_top3).mark_bar(cornerRadiusEnd=7).encode(
+                                x=alt.X('Revenue:Q', title='營收'),
+                                y=alt.Y('Product:N', sort='-x', title='商品'),
+                                color=alt.Color('Category:N', title='項目', scale=alt.Scale(scheme='set2')),
+                                row=alt.Row('Category:N', title=None, header=alt.Header(labelColor="#f8fafc", labelFontWeight="bold")),
+                                tooltip=[
+                                    alt.Tooltip('Category:N', title='項目'),
+                                    alt.Tooltip('Rank:Q', title='排名'),
+                                    alt.Tooltip('Product:N', title='商品'),
+                                    alt.Tooltip('Brand:N', title='品牌'),
+                                    alt.Tooltip('Qty:Q', title='件數'),
+                                    alt.Tooltip('Revenue:Q', title='營收', format=',')
+                                ]
+                            )
+                            st.altair_chart(style_chart(top3_chart, max(280, min(900, 170 * category_top3['Category'].nunique()))), width="stretch")
 
                         st.divider()
 
