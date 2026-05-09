@@ -482,24 +482,135 @@ st.markdown(
         text-align: right;
         white-space: nowrap;
     }
+    .mobile-cart-bar {
+        display: none;
+    }
 
     /* === 📱 手機版專用優化 === */
     @media only screen and (max-width: 768px) {
+        .stApp {
+            background:
+                radial-gradient(circle at top right, rgba(217,255,116,0.08), transparent 34%),
+                #151515;
+        }
         .block-container {
-            padding-top: 1rem !important;
-            padding-bottom: 5rem !important; 
-            padding-left: 0.5rem !important;
-            padding-right: 0.5rem !important;
+            padding-top: 0.8rem !important;
+            padding-bottom: 7.5rem !important;
+            padding-left: 0.65rem !important;
+            padding-right: 0.65rem !important;
+        }
+        div[data-testid="stVerticalBlockBorderWrapper"] {
+            background: linear-gradient(180deg, #222222 0%, #1d1d1d 100%);
+            border: 1px solid #343a46;
+            border-radius: 12px;
+            padding: 14px !important;
+            margin-bottom: 10px;
+        }
+        .shop-toolbar-title {
+            font-size: 18px;
+        }
+        .shop-toolbar-meta {
+            font-size: 12px;
+            line-height: 1.35;
+        }
+        .product-title {
+            font-size: 20px;
+            line-height: 1.25;
+        }
+        .brand-pill {
+            font-size: 12px;
+            margin-bottom: 12px;
+        }
+        .section-heading,
+        .cart-title {
+            font-size: 18px;
+        }
+        .table-head {
+            font-size: 11px;
+        }
+        .sku-size,
+        .price-wholesale,
+        .price-retail {
+            font-size: 13px;
+        }
+        div[data-testid="stVerticalBlockBorderWrapper"] div[data-testid="stNumberInput"] {
+            min-width: 92px !important;
+            max-width: 118px !important;
         }
         div[data-testid="column"] {
-            padding: 0px 2px !important;
-            min-width: 0px !important; 
+            padding: 0px 1px !important;
+            min-width: 0px !important;
         }
         div.stButton > button {
-            min-height: 40px !important;
+            min-height: 44px !important;
+            border-radius: 10px !important;
+        }
+        button[kind="primary"] {
+            background-color: #d9ff74 !important;
+            color: #111827 !important;
+            box-shadow: none !important;
+        }
+        button[kind="primary"] p {
+            color: #111827 !important;
+            font-weight: 900 !important;
+        }
+        div[data-testid="stTextInput"] input,
+        div[data-baseweb="select"] > div {
+            min-height: 44px !important;
+            border-radius: 10px !important;
         }
         p, .stMarkdown, div[data-testid="stText"] {
-            font-size: 14px !important;
+            font-size: 13px !important;
+        }
+        .threshold-card {
+            border-radius: 10px;
+            padding: 10px 12px;
+        }
+        .cart-total-box {
+            border-radius: 12px;
+            padding: 12px;
+        }
+        .cart-item-name {
+            font-size: 12px;
+            line-height: 1.25;
+        }
+        .cart-item-price {
+            font-size: 12px;
+        }
+        .mobile-cart-bar {
+            display: flex;
+            position: fixed;
+            left: 10px;
+            right: 10px;
+            bottom: 12px;
+            z-index: 9999;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            background: rgba(28, 32, 40, 0.96);
+            border: 1px solid #3f4654;
+            border-radius: 16px;
+            padding: 12px 14px;
+            box-shadow: 0 12px 36px rgba(0,0,0,0.44);
+            backdrop-filter: blur(10px);
+        }
+        .mobile-cart-main {
+            color: #f8fafc !important;
+            font-size: 13px;
+            font-weight: 900;
+            line-height: 1.2;
+        }
+        .mobile-cart-sub {
+            color: #aeb4bd !important;
+            font-size: 11px;
+            font-weight: 750;
+            margin-top: 3px;
+        }
+        .mobile-cart-total {
+            color: #d9ff74 !important;
+            font-size: 17px;
+            font-weight: 950;
+            white-space: nowrap;
         }
     }
     </style>
@@ -1982,6 +2093,18 @@ def main_app(user):
 
                 summary_html += f"<div class='cart-total-row final'><span>總計含稅</span><span>${grand_total:,}</span></div></div>"
                 st.markdown(summary_html, unsafe_allow_html=True)
+                st.markdown(
+                    f"""
+                    <div class="mobile-cart-bar">
+                        <div>
+                            <div class="mobile-cart-main">購物車 {cart_sku_total} SKU / {cart_qty_total} 件</div>
+                            <div class="mobile-cart-sub">往下確認明細與送出訂單</div>
+                        </div>
+                        <div class="mobile-cart-total">${grand_total:,}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
                 
                 if is_order_free_shipping: st.info("🎉 訂單已享免運優惠！")
                 else: st.warning(f"⚠️ 全單未達免運標準，需付運費 ${SHIPPING_FEE}")
