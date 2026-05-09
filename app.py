@@ -494,7 +494,7 @@ st.markdown(
                 #151515;
         }
         .block-container {
-            padding-top: 0.8rem !important;
+            padding-top: 4.4rem !important;
             padding-bottom: 7.5rem !important;
             padding-left: 0.65rem !important;
             padding-right: 0.65rem !important;
@@ -528,10 +528,34 @@ st.markdown(
         .table-head {
             font-size: 11px;
         }
+        .desktop-sku-header {
+            display: none !important;
+        }
+        .sku-section-marker {
+            display: none;
+        }
+        div[data-testid="stVerticalBlock"]:has(.sku-section-marker) div[data-testid="stHorizontalBlock"] {
+            flex-wrap: nowrap !important;
+            align-items: center !important;
+            gap: 6px !important;
+        }
+        div[data-testid="stVerticalBlock"]:has(.sku-section-marker) div[data-testid="column"] {
+            min-width: 0 !important;
+            flex: 1 1 0 !important;
+        }
+        div[data-testid="stVerticalBlock"]:has(.sku-section-marker) div[data-testid="stNumberInput"] {
+            min-width: 74px !important;
+            max-width: 88px !important;
+        }
+        div[data-testid="stVerticalBlock"]:has(.sku-section-marker) button[kind="primary"] {
+            min-width: 58px !important;
+            padding-left: 4px !important;
+            padding-right: 4px !important;
+        }
         .sku-size,
         .price-wholesale,
         .price-retail {
-            font-size: 13px;
+            font-size: 12px;
         }
         div[data-testid="stVerticalBlockBorderWrapper"] div[data-testid="stNumberInput"] {
             min-width: 92px !important;
@@ -1860,13 +1884,13 @@ def main_app(user):
             selected_color = st.selectbox("顏色", available_colors, key=f"color_sel_{current_name}")
             variants = current_product_data[current_product_data['Color'] == selected_color]
             st.markdown("<br>", unsafe_allow_html=True)
-            h1, h2, h3, h4, h5 = st.columns([1.0, 1.6, 1.6, 1.6, 1.8], vertical_alignment="center")
-            h1.markdown("<div class='table-head'>尺寸</div>", unsafe_allow_html=True)
-            h2.markdown("<div class='table-head'>數量</div>", unsafe_allow_html=True)
-            h3.markdown("<div class='table-head'>批發價<br>(未稅)</div>", unsafe_allow_html=True)
-            h4.markdown("<div class='table-head'>零售價<br>(含稅)</div>", unsafe_allow_html=True)
-            h5.markdown("") 
-            st.markdown("<div class='sku-table-divider'></div>", unsafe_allow_html=True)
+            st.markdown("<span class='sku-section-marker'></span>", unsafe_allow_html=True)
+            st.markdown(
+                "<div class='desktop-sku-header'>"
+                "<div class='sku-table-divider'></div>"
+                "</div>",
+                unsafe_allow_html=True
+            )
 
             def add_to_cart_callback(p_id, p_name, p_spec, p_w, p_r, q_key, p_brand, p_category):
                 qty = st.session_state[q_key]
@@ -1888,14 +1912,18 @@ def main_app(user):
 
             for i, (_, sku) in enumerate(variants.iterrows()):
                 c_row = st.container()
-                c1, c2, c3, c4, c5 = c_row.columns([1.0, 1.6, 1.6, 1.6, 1.8], vertical_alignment="center")
+                c1, c2, c3, c4 = c_row.columns([0.85, 1.25, 1.25, 0.95], vertical_alignment="center")
                 with c1: st.markdown(f"<div class='sku-size'>{escape_html(sku['Size'])}</div>", unsafe_allow_html=True)
                 with c2:
+                    st.markdown(
+                        f"<div class='price-wholesale'>${int(sku['Wholesale_Price']):,}</div>"
+                        f"<div class='price-retail'>${int(sku['Retail_Price']):,}</div>",
+                        unsafe_allow_html=True
+                    )
+                with c3:
                     qty_key = f"qty_input_{sku['Product_ID']}_{selected_color}_{i}"
                     st.number_input("Qty", min_value=1, value=1, step=1, key=qty_key, label_visibility="collapsed")
-                with c3: st.markdown(f"<div class='price-wholesale'>${int(sku['Wholesale_Price']):,}</div>", unsafe_allow_html=True)
-                with c4: st.markdown(f"<div class='price-retail'>${int(sku['Retail_Price']):,}</div>", unsafe_allow_html=True)
-                with c5:
+                with c4:
                     st.button("ADD", key=f"add_{sku['Product_ID']}_{selected_color}_{i}", type="primary", width="stretch",
                         on_click=add_to_cart_callback,
                         args=(sku['Product_ID'], current_name, f"{selected_color} / {str(sku['Size'])}", sku['Wholesale_Price'], sku['Retail_Price'], qty_key, current_product_data.iloc[0]['Brand'], current_product_data.iloc[0]['Category']))
@@ -1908,30 +1936,6 @@ def main_app(user):
             main_img = convert_drive_url(img_row['Image_URL'])
             if main_img: st.image(main_img, width="stretch")
             else: st.warning("No Image")
-            st.markdown("<div class='section-heading'>Related Products / 同系列商品</div>", unsafe_allow_html=True)
-            current_category = current_product_data.iloc[0]['Category']
-            same_category_products = shop_product_scope[shop_product_scope['Category'] == current_category]['Name'].unique()
-            others = [p for p in same_category_products if p != current_name]
-            for i in range(0, len(others), 2):
-                cols = st.columns(2)
-                batch = others[i:i+2]
-                for idx, other_prod in enumerate(batch):
-                    row = df_products[df_products['Name'] == other_prod].iloc[0]
-                    thumb = convert_drive_url(row['Image_URL'])
-                    with cols[idx]:
-                        with st.container(border=True):
-                            if thumb: 
-                                st.image(thumb, width="stretch")
-                            else:
-                                st.markdown("<div style='height: 150px; background-color: #f0f0f0; display: flex; align-items: center; justify-content: center; color: #666;'>No Image</div>", unsafe_allow_html=True)
-                            
-                            display_name = str(other_prod)
-                            if len(display_name) > 18:
-                                display_name = display_name[:17] + "..."
-                            if st.button(display_name, key=f"view_{other_prod}_{i}_{idx}", width="stretch", help=str(other_prod)):
-                                set_current_product(other_prod)
-                                st.rerun()
-            if not others: st.caption("此分類下無其他商品")
 
     # 購物車邏輯
     def update_item_qty(item_id):
@@ -2262,7 +2266,3 @@ def login_page():
                             st.error("帳號或密碼錯誤")
 
 if __name__ == "__main__":
-    if 'user' not in st.session_state:
-        login_page()
-    else:
-        main_app(st.session_state['user'])
