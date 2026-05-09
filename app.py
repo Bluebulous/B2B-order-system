@@ -534,20 +534,53 @@ st.markdown(
         .sku-section-marker {
             display: none;
         }
-        div[data-testid="stVerticalBlock"]:has(.sku-section-marker) div[data-testid="stHorizontalBlock"] {
-            flex-wrap: nowrap !important;
+        .mobile-sku-card {
+            display: block;
+            border: 1px solid #2f3540;
+            background: #1b1f27;
+            border-radius: 12px;
+            padding: 12px;
+            margin: 10px 0 8px 0;
+        }
+        .mobile-sku-top {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            align-items: flex-start;
+        }
+        .mobile-sku-size {
+            color: #f8fafc !important;
+            font-size: 16px;
+            font-weight: 950;
+        }
+        .mobile-sku-prices {
+            text-align: right;
+        }
+        .mobile-sku-action-hint {
+            color: #9ca3af !important;
+            font-size: 11px;
+            font-weight: 750;
+            margin-top: 8px;
+        }
+        div[data-testid="stElementContainer"]:has(.sku-row-start) + div[data-testid="stHorizontalBlock"] {
+            display: grid !important;
+            grid-template-columns: 48px minmax(78px, 1fr) 92px 62px !important;
+            column-gap: 7px !important;
             align-items: center !important;
-            gap: 6px !important;
+            border-top: 1px solid #2f3540;
+            padding-top: 10px;
+            margin-top: 8px;
         }
-        div[data-testid="stVerticalBlock"]:has(.sku-section-marker) div[data-testid="column"] {
+        div[data-testid="stElementContainer"]:has(.sku-row-start) + div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
+            width: 100% !important;
             min-width: 0 !important;
-            flex: 1 1 0 !important;
+            padding: 0 !important;
         }
-        div[data-testid="stVerticalBlock"]:has(.sku-section-marker) div[data-testid="stNumberInput"] {
-            min-width: 74px !important;
-            max-width: 88px !important;
+        div[data-testid="stElementContainer"]:has(.sku-row-start) + div[data-testid="stHorizontalBlock"] div[data-testid="stNumberInput"] {
+            min-width: 84px !important;
+            max-width: 92px !important;
         }
-        div[data-testid="stVerticalBlock"]:has(.sku-section-marker) button[kind="primary"] {
+        div[data-testid="stElementContainer"]:has(.sku-row-start) + div[data-testid="stHorizontalBlock"] button[kind="primary"] {
             min-width: 58px !important;
             padding-left: 4px !important;
             padding-right: 4px !important;
@@ -635,6 +668,14 @@ st.markdown(
             font-size: 17px;
             font-weight: 950;
             white-space: nowrap;
+        }
+        .desktop-only {
+            display: none !important;
+        }
+    }
+    @media only screen and (min-width: 769px) {
+        .mobile-only {
+            display: none !important;
         }
     }
     </style>
@@ -1884,6 +1925,11 @@ def main_app(user):
             selected_color = st.selectbox("顏色", available_colors, key=f"color_sel_{current_name}")
             variants = current_product_data[current_product_data['Color'] == selected_color]
             st.markdown("<br>", unsafe_allow_html=True)
+            h1, h2, h3, h4 = st.columns([0.85, 1.25, 1.25, 0.95], vertical_alignment="center")
+            h1.markdown("<div class='desktop-only table-head'>尺寸</div>", unsafe_allow_html=True)
+            h2.markdown("<div class='desktop-only table-head'>價格</div>", unsafe_allow_html=True)
+            h3.markdown("<div class='desktop-only table-head'>數量</div>", unsafe_allow_html=True)
+            h4.markdown("<div class='desktop-only table-head'>加入</div>", unsafe_allow_html=True)
             st.markdown("<span class='sku-section-marker'></span>", unsafe_allow_html=True)
             st.markdown(
                 "<div class='desktop-sku-header'>"
@@ -1911,8 +1957,8 @@ def main_app(user):
                     st.session_state.has_logged_cart_start = True
 
             for i, (_, sku) in enumerate(variants.iterrows()):
-                c_row = st.container()
-                c1, c2, c3, c4 = c_row.columns([0.85, 1.25, 1.25, 0.95], vertical_alignment="center")
+                st.markdown("<span class='sku-row-start'></span>", unsafe_allow_html=True)
+                c1, c2, c3, c4 = st.columns([0.85, 1.25, 1.25, 0.95], vertical_alignment="center")
                 with c1: st.markdown(f"<div class='sku-size'>{escape_html(sku['Size'])}</div>", unsafe_allow_html=True)
                 with c2:
                     st.markdown(
