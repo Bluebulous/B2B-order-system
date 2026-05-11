@@ -675,6 +675,9 @@ st.markdown(
         .desktop-related-products {
             display: none !important;
         }
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(.desktop-related-products) {
+            display: none !important;
+        }
     }
     @media only screen and (min-width: 769px) {
         .mobile-only {
@@ -1985,7 +1988,9 @@ def main_app(user):
             main_img = convert_drive_url(img_row['Image_URL'])
             if main_img: st.image(main_img, width="stretch")
             else: st.warning("No Image")
-            st.markdown("<div class='desktop-related-products'>", unsafe_allow_html=True)
+
+        with st.container(border=True):
+            st.markdown("<span class='desktop-related-products'></span>", unsafe_allow_html=True)
             st.markdown("<div class='section-heading'>Related Products / 同系列商品</div>", unsafe_allow_html=True)
             current_category = current_product_data.iloc[0]['Category']
             same_category_products = shop_product_scope[shop_product_scope['Category'] == current_category]['Name'].unique()
@@ -2011,7 +2016,6 @@ def main_app(user):
                                 st.rerun()
             if not others:
                 st.caption("此分類下無其他商品")
-            st.markdown("</div>", unsafe_allow_html=True)
 
     # 購物車邏輯
     def update_item_qty(item_id):
