@@ -886,6 +886,9 @@ def main_app(user):
         if st.button("歷史訂單", width="stretch"):
             st.session_state.page = 'history'
             st.rerun()
+        if st.button("我的採購分析", width="stretch"):
+            st.session_state.page = 'my_analytics'
+            st.rerun()
         if st.button("個人資料", width="stretch"):
             st.session_state.page = 'profile'
             st.rerun()
@@ -1074,6 +1077,204 @@ def main_app(user):
                         st.info("目前沒有您的訂單紀錄")
             except Exception as e:
                 st.error(f"讀取失敗: {e}")
+        return
+
+    # 1b. 我的採購分析頁
+    if st.session_state.page == 'my_analytics':
+        st.markdown(
+            """
+            <div class="dashboard-hero">
+                <div>
+                    <div class="dashboard-title">我的採購分析</div>
+                    <div class="dashboard-subtitle">只顯示本通路自己的採購紀錄與常購商品</div>
+                </div>
+                <div class="dashboard-pill">Private Dealer View</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+        try:
+            orders = get_data("orders")
+            if orders.empty:
+                st.info("目前沒有採購紀錄可分析")
+                return
+
+            if 'Extra_Discount' not in orders.columns: orders['Extra_Discount'] = 0
+            orders['Order_Date'] = pd.to_datetime(orders['Order_Time'], errors='coerce')
+            orders = orders.dropna(subset=['Order_Date']).copy()
+            orders['Total'] = pd.to_numeric(orders['Total'], errors='coerce').fillna(0)
+            orders['Month'] = orders['Order_Date'].dt.strftime('%Y-%m')
+
+            match_email = orders['Email'].astype(str).str.strip() == str(user.get('Username', '')).strip()
+            match_dealer = orders['Customer_Name'].astype(str).str.strip() == str(user.get('Dealer_Name', '')).strip()
+            my_orders = orders[match_email | match_dealer].sort_values("Order_Date", ascending=False).copy()
+
+            if my_orders.empty:
+                st.info("目前沒有您的採購紀錄")
+                return
+
+            df_prods = get_products_data()
+            prod_cat_map = {}
+            if not df_prods.empty and 'Name' in df_prods.columns and 'Category' in df_prods.columns:
+                prod_cat_map = dict(zip(df_prods['Name'], df_prods['Category']))
+
+            my_items_list = []
+            for _, row in my_orders.iterrows():
+                try:
+                    items = row['Items_Json']
+                    if isinstance(items, str):
+                        items = json.loads(items)
+                    for item in items.values():
+                        product_name = item.get('name', 'Unknown')
+                        my_items_list.append({
+                            'Order_ID': row['Order_ID'],
+                            'Order_Date': row['Order_Date'],
+                            'Month': row['Order_Date'].strftime('%Y-%m'),
+                            'Brand': item.get('brand', 'Unknown'),
+                            'Product': product_name,
+                            'Category': item.get('category', prod_cat_map.get(product_name, 'Unknown')),
+                            'Qty': int(item.get('qty', 0)),
+                            'Subtotal': int(item.get('final_subtotal', 0)),
+                        })
+                except: pass
+
+            my_items = pd.DataFrame(my_items_list)
+
+            total_spent = int(my_orders['Total'].sum())
+            total_order_count = len(my_orders)
+            last_order_date = my_orders['Order_Date'].max().strftime('%Y-%m-%d')
+            total_qty = int(my_items['Qty'].sum()) if not my_items.empty else 0
+
+            kpi_items = [
+                ("累積採購金額", f"${total_spent:,}", "Total"),
+                ("累積訂單數", f"{total_order_count}", "Orders"),
+                ("最近一次採購", last_order_date, "Latest"),
+                ("累積採購件數", f"{total_qty:,}", "Units"),
+            ]
+            kpi_cols = st.columns(4)
+            for col, (label, value, note) in zip(kpi_cols, kpi_items):
+                with col:
+                    st.markdown(
+                        f"""
+                        <div class="dashboard-kpi">
+                            <div class="dashboard-kpi-label">{escape_html(label)}</div>
+                            <div class="dashboard-kpi-value">{escape_html(value)}</div>
+                            <div class="dashboard-kpi-note">{escape_html(note)}</div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True
+                    )
+
+            st.divider()
+
+            if my_items.empty:
+                st.info("目前訂單中沒有可分析的商品明細")
+                return
+
+            chart_col1, chart_col2 = st.columns([1.25, 1])
+            with chart_col1:
+                with st.container(border=True):
+                    st.markdown("<div class='dashboard-card-title'>每月採購趨勢</div><div class='dashboard-card-caption'>回顧每月採購金額與件數，掌握補貨節奏</div>", unsafe_allow_html=True)
+                    monthly = my_items.groupby('Month', as_index=False).agg(
+                        Amount=('Subtotal', 'sum'),
+                        Qty=('Qty', 'sum')
+                    )
+                    base = alt.Chart(monthly).encode(x=alt.X('Month:N', title='月份'))
+                    bar = base.mark_bar(color="#d9ff74", cornerRadiusTopLeft=8, cornerRadiusTopRight=8).encode(
+                        y=alt.Y('Amount:Q', title='採購金額'),
+                        tooltip=[
+                            alt.Tooltip('Month:N', title='月份'),
+                            alt.Tooltip('Amount:Q', title='採購金額', format=','),
+                            alt.Tooltip('Qty:Q', title='採購件數')
+                        ]
+                    )
+                    line = base.mark_line(point=True, color="#6ee7f9", strokeWidth=3).encode(
+                        y=alt.Y('Qty:Q', title='件數')
+                    )
+                    trend_chart = (bar + line).resolve_scale(y='independent').properties(height=320)
+                    st.altair_chart(
+                        trend_chart.configure(background="transparent").configure_view(strokeWidth=0),
+                        width="stretch"
+                    )
+
+            with chart_col2:
+                with st.container(border=True):
+                    st.markdown("<div class='dashboard-card-title'>項目採購占比</div><div class='dashboard-card-caption'>看自己主要採購哪些商品類型</div>", unsafe_allow_html=True)
+                    cat_share = my_items.groupby('Category', as_index=False).agg(
+                        Amount=('Subtotal', 'sum'),
+                        Qty=('Qty', 'sum')
+                    )
+                    pie = alt.Chart(cat_share).mark_arc(innerRadius=55, outerRadius=115).encode(
+                        theta=alt.Theta('Amount:Q'),
+                        color=alt.Color('Category:N', title='項目', scale=alt.Scale(scheme='set2')),
+                        tooltip=[
+                            alt.Tooltip('Category:N', title='項目'),
+                            alt.Tooltip('Amount:Q', title='採購金額', format=','),
+                            alt.Tooltip('Qty:Q', title='件數')
+                        ]
+                    ).properties(height=320).configure(background="transparent")
+                    st.altair_chart(pie, width="stretch")
+
+            st.divider()
+
+            top_col1, top_col2 = st.columns(2)
+            top_products = my_items.groupby(['Product', 'Brand', 'Category'], as_index=False).agg(
+                Qty=('Qty', 'sum'),
+                Amount=('Subtotal', 'sum')
+            )
+            with top_col1:
+                with st.container(border=True):
+                    st.markdown("<div class='dashboard-card-title'>常購商品 TOP 10 / 件數</div><div class='dashboard-card-caption'>適合用來快速補貨</div>", unsafe_allow_html=True)
+                    top_by_qty = top_products.sort_values('Qty', ascending=False).head(10)
+                    st.dataframe(
+                        top_by_qty,
+                        column_config={
+                            "Product": st.column_config.TextColumn("商品"),
+                            "Brand": st.column_config.TextColumn("品牌"),
+                            "Category": st.column_config.TextColumn("項目"),
+                            "Qty": st.column_config.NumberColumn("件數", format="%d"),
+                            "Amount": st.column_config.NumberColumn("金額", format="$%d"),
+                        },
+                        width="stretch",
+                        hide_index=True
+                    )
+            with top_col2:
+                with st.container(border=True):
+                    st.markdown("<div class='dashboard-card-title'>熱銷商品 TOP 10 / 金額</div><div class='dashboard-card-caption'>看自己採購金額最高的商品</div>", unsafe_allow_html=True)
+                    top_by_amount = top_products.sort_values('Amount', ascending=False).head(10)
+                    st.dataframe(
+                        top_by_amount,
+                        column_config={
+                            "Product": st.column_config.TextColumn("商品"),
+                            "Brand": st.column_config.TextColumn("品牌"),
+                            "Category": st.column_config.TextColumn("項目"),
+                            "Qty": st.column_config.NumberColumn("件數", format="%d"),
+                            "Amount": st.column_config.NumberColumn("金額", format="$%d"),
+                        },
+                        width="stretch",
+                        hide_index=True
+                    )
+
+            st.divider()
+
+            with st.container(border=True):
+                st.markdown("<div class='dashboard-card-title'>最近採購紀錄</div><div class='dashboard-card-caption'>最近 10 筆訂單摘要</div>", unsafe_allow_html=True)
+                recent_orders = my_orders[['Order_Time', 'Order_ID', 'Status', 'Total']].head(10).copy()
+                recent_orders['Order_Time'] = pd.to_datetime(recent_orders['Order_Time'], errors='coerce').dt.strftime('%Y-%m-%d')
+                st.dataframe(
+                    recent_orders,
+                    column_config={
+                        "Order_Time": st.column_config.TextColumn("採購日期"),
+                        "Order_ID": st.column_config.TextColumn("訂單編號"),
+                        "Status": st.column_config.TextColumn("狀態"),
+                        "Total": st.column_config.NumberColumn("金額", format="$%d"),
+                    },
+                    width="stretch",
+                    hide_index=True
+                )
+
+        except Exception as e:
+            st.error(f"採購分析載入失敗: {e}")
         return
 
     # 2. 個人資料頁
