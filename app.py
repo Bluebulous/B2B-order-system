@@ -704,6 +704,14 @@ def main_app(user):
         st.session_state.current_product_name = product_name
         st.session_state.product_picker_version += 1
 
+    def is_mobile_client():
+        try:
+            user_agent = str(st.context.headers.get("user-agent", "")).lower()
+        except Exception:
+            user_agent = ""
+        mobile_markers = ["iphone", "android", "mobile", "ipad", "ipod"]
+        return any(marker in user_agent for marker in mobile_markers)
+
     def calculate_cart_totals(extra_discount=0):
         BRAND_RULES, _ = get_brand_rules()
         for item in st.session_state.cart.values():
@@ -1989,33 +1997,34 @@ def main_app(user):
             if main_img: st.image(main_img, width="stretch")
             else: st.warning("No Image")
 
-        with st.container(border=True):
-            st.markdown("<span class='desktop-related-products'></span>", unsafe_allow_html=True)
-            st.markdown("<div class='section-heading'>Related Products / 同系列商品</div>", unsafe_allow_html=True)
-            current_category = current_product_data.iloc[0]['Category']
-            same_category_products = shop_product_scope[shop_product_scope['Category'] == current_category]['Name'].unique()
-            others = [p for p in same_category_products if p != current_name]
-            for i in range(0, len(others), 2):
-                cols = st.columns(2)
-                batch = others[i:i+2]
-                for idx, other_prod in enumerate(batch):
-                    row = df_products[df_products['Name'] == other_prod].iloc[0]
-                    thumb = convert_drive_url(row['Image_URL'])
-                    with cols[idx]:
-                        with st.container(border=True):
-                            if thumb:
-                                st.image(thumb, width="stretch")
-                            else:
-                                st.markdown("<div style='height: 150px; background-color: #f0f0f0; display: flex; align-items: center; justify-content: center; color: #666;'>No Image</div>", unsafe_allow_html=True)
+        if not is_mobile_client():
+            with st.container(border=True):
+                st.markdown("<span class='desktop-related-products'></span>", unsafe_allow_html=True)
+                st.markdown("<div class='section-heading'>Related Products / 同系列商品</div>", unsafe_allow_html=True)
+                current_category = current_product_data.iloc[0]['Category']
+                same_category_products = shop_product_scope[shop_product_scope['Category'] == current_category]['Name'].unique()
+                others = [p for p in same_category_products if p != current_name]
+                for i in range(0, len(others), 2):
+                    cols = st.columns(2)
+                    batch = others[i:i+2]
+                    for idx, other_prod in enumerate(batch):
+                        row = df_products[df_products['Name'] == other_prod].iloc[0]
+                        thumb = convert_drive_url(row['Image_URL'])
+                        with cols[idx]:
+                            with st.container(border=True):
+                                if thumb:
+                                    st.image(thumb, width="stretch")
+                                else:
+                                    st.markdown("<div style='height: 150px; background-color: #f0f0f0; display: flex; align-items: center; justify-content: center; color: #666;'>No Image</div>", unsafe_allow_html=True)
 
-                            display_name = str(other_prod)
-                            if len(display_name) > 18:
-                                display_name = display_name[:17] + "..."
-                            if st.button(display_name, key=f"view_{other_prod}_{i}_{idx}", width="stretch", help=str(other_prod)):
-                                set_current_product(other_prod)
-                                st.rerun()
-            if not others:
-                st.caption("此分類下無其他商品")
+                                display_name = str(other_prod)
+                                if len(display_name) > 18:
+                                    display_name = display_name[:17] + "..."
+                                if st.button(display_name, key=f"view_{other_prod}_{i}_{idx}", width="stretch", help=str(other_prod)):
+                                    set_current_product(other_prod)
+                                    st.rerun()
+                if not others:
+                    st.caption("此分類下無其他商品")
 
     # 購物車邏輯
     def update_item_qty(item_id):
