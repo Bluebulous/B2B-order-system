@@ -590,6 +590,35 @@ st.markdown(
         .price-retail {
             font-size: 12px;
         }
+        .price-wholesale {
+            color: #d9ff74 !important;
+            font-size: 18px !important;
+            font-weight: 950 !important;
+            line-height: 1.15;
+        }
+        .price-wholesale::before {
+            content: "批發價 ";
+            display: block;
+            color: #9ca3af !important;
+            font-size: 10px;
+            font-weight: 800;
+            margin-bottom: 3px;
+        }
+        .price-retail {
+            color: #aeb4bd !important;
+            font-size: 15px !important;
+            font-weight: 850 !important;
+            line-height: 1.15;
+            margin-top: 7px;
+        }
+        .price-retail::before {
+            content: "零售價 ";
+            display: block;
+            color: #7d8591 !important;
+            font-size: 10px;
+            font-weight: 800;
+            margin-bottom: 3px;
+        }
         div[data-testid="stVerticalBlockBorderWrapper"] div[data-testid="stNumberInput"] {
             min-width: 92px !important;
             max-width: 118px !important;
