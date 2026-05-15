@@ -21,6 +21,16 @@ from services.supabase_service import (
 from utils.formatting import convert_drive_url, display_status_badges, escape_html
 from utils.security import hash_password, is_admin, is_password_hash, verify_password
 
+
+def clean_text(value):
+    if pd.isna(value):
+        return ""
+    text = str(value).strip()
+    if text.lower() in {"nan", "none", "null"}:
+        return ""
+    return text
+
+
 # --- 1. 系統設定 ---
 st.set_page_config(
     page_title="Bluebulous B2B",
@@ -1347,7 +1357,30 @@ def main_app(user):
                         if 'Tracking_Number' not in orders.columns: orders['Tracking_Number'] = ""
                         if 'Admin_Note' not in orders.columns: orders['Admin_Note'] = ""
                         if 'Extra_Discount' not in orders.columns: orders['Extra_Discount'] = 0
+                        if 'Phone' not in orders.columns: orders['Phone'] = ""
+                        if 'Address' not in orders.columns: orders['Address'] = ""
+                        if 'Shipping_Address' not in orders.columns: orders['Shipping_Address'] = ""
+                        if 'Recipient_Name' not in orders.columns: orders['Recipient_Name'] = ""
                         orders['Extra_Discount'] = orders['Extra_Discount'].fillna(0).astype(int)
+
+                        user_contact_lookup = {}
+                        try:
+                            users_for_contacts = get_data("users")
+                            if not users_for_contacts.empty:
+                                for _, user_row in users_for_contacts.iterrows():
+                                    contact_info = {
+                                        "Phone": clean_text(user_row.get("Phone", "")),
+                                        "Address": clean_text(user_row.get("Address", "")),
+                                        "Contact_Person": clean_text(user_row.get("Contact_Person", "")),
+                                    }
+                                    username_key = clean_text(user_row.get("Username", "")).strip()
+                                    dealer_key = clean_text(user_row.get("Dealer_Name", "")).strip()
+                                    if username_key:
+                                        user_contact_lookup[("email", username_key)] = contact_info
+                                    if dealer_key:
+                                        user_contact_lookup[("dealer", dealer_key)] = contact_info
+                        except Exception:
+                            user_contact_lookup = {}
 
                         all_orders = orders.sort_values("Order_Time", ascending=False)
                         st.markdown(f"共 {len(all_orders)} 筆訂單")
@@ -1370,6 +1403,18 @@ def main_app(user):
                                 order_date_text = str(row.get('Order_Time', ''))
                                 order_time_text = str(row.get('Order_Time', ''))
                             expander_title = f"{status_icon} {status_str} | {order_date_text} | {row['Customer_Name']} (${row['Total']})"
+                            matched_contact = user_contact_lookup.get(("email", clean_text(row.get("Email", "")).strip()), {})
+                            if not matched_contact:
+                                matched_contact = user_contact_lookup.get(("dealer", clean_text(row.get("Customer_Name", "")).strip()), {})
+
+                            recipient_name = clean_text(row.get("Recipient_Name", "")) or clean_text(row.get("Customer_Name", ""))
+                            recipient_phone = clean_text(row.get("Phone", "")) or matched_contact.get("Phone", "")
+                            recipient_address = (
+                                clean_text(row.get("Address", ""))
+                                or clean_text(row.get("Shipping_Address", ""))
+                                or matched_contact.get("Address", "")
+                            )
+                            contact_person = matched_contact.get("Contact_Person", "")
                             
                             with st.expander(expander_title):
                                 st.markdown(f"### 目前狀態: {status_badges}", unsafe_allow_html=True)
@@ -1380,6 +1425,13 @@ def main_app(user):
                                     st.markdown(f"**採購日期:** {order_time_text}")
                                     st.markdown(f"**客戶:** {row['Customer_Name']}")
                                     st.markdown(f"**Email:** {row['Email']}")
+                                    st.divider()
+                                    st.markdown("**收件資訊**")
+                                    st.markdown(f"**收件姓名:** {recipient_name or '-'}")
+                                    if contact_person and contact_person != recipient_name:
+                                        st.markdown(f"**聯絡人:** {contact_person}")
+                                    st.markdown(f"**聯絡電話:** {recipient_phone or '-'}")
+                                    st.markdown(f"**收件地址:** {recipient_address or '-'}")
                                 with c2:
                                     st.markdown("**訂購內容:**")
                                     try:
@@ -1408,9 +1460,9 @@ def main_app(user):
                                         
                                         # 🛡️ 濾網一：從後台抓取客戶資料時，強制過濾掉所有的 NaN，替換成安全的空字串
                                         st.session_state.editing_customer_info = {
-                                            "Customer_Name": str(row['Customer_Name']) if pd.notna(row['Customer_Name']) else "", 
-                                            "Email": str(row['Email']) if pd.notna(row['Email']) else "", 
-                                            "Phone": str(row['Phone']) if pd.notna(row['Phone']) else "",
+                                            "Customer_Name": clean_text(row.get('Customer_Name', "")),
+                                            "Email": clean_text(row.get('Email', "")),
+                                            "Phone": recipient_phone,
                                             "Extra_Discount": int(row.get('Extra_Discount', 0)) if pd.notna(row.get('Extra_Discount', 0)) else 0
                                         }
                                         st.session_state.page = 'shop'
