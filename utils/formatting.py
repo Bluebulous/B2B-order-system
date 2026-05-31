@@ -12,6 +12,7 @@ EXPECTED_COLS = {
     'shopline_sku': 'Shopline_SKU', 'shopline_product_id': 'Shopline_Product_ID',
     'shopline_stock': 'Shopline_Stock', 'current_stock': 'Current_Stock', 'stock': 'Stock',
     'inventory': 'Inventory', 'inventory_qty': 'Inventory_Qty', 'available_quantity': 'Available_Quantity',
+    'quantity': 'Quantity', 'qty': 'Qty', 'on_hand': 'On_Hand', 'on_hand_qty': 'On_Hand_Qty',
     'stock_updated_at': 'Stock_Updated_At', 'restock_qty': 'Restock_Qty',
     'expected_arrival_date': 'Expected_Arrival_Date', 'restock_date': 'Restock_Date',
     'order_id': 'Order_ID', 'order_time': 'Order_Time', 'customer_name': 'Customer_Name', 'email': 'Email',
