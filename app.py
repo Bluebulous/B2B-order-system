@@ -47,6 +47,19 @@ def first_existing_column(df, candidates):
     return None
 
 
+def first_populated_number_column(df, candidates):
+    fallback = None
+    for column in candidates:
+        if column not in df.columns:
+            continue
+        if fallback is None:
+            fallback = column
+        numeric_values = pd.to_numeric(df[column], errors="coerce")
+        if numeric_values.notna().any():
+            return column
+    return fallback
+
+
 def parse_order_items(items_json):
     if isinstance(items_json, str):
         try:
@@ -2178,9 +2191,12 @@ def main_app(user):
                     if column not in inventory_df.columns:
                         inventory_df[column] = ""
 
-                stock_col = first_existing_column(
+                stock_col = first_populated_number_column(
                     inventory_df,
-                    ["Shopline_Stock", "Current_Stock", "Stock", "Inventory", "Inventory_Qty", "Available_Quantity"]
+                    [
+                        "Shopline_Stock", "Current_Stock", "Stock", "Inventory", "Inventory_Qty",
+                        "Available_Quantity", "Quantity", "Qty", "On_Hand", "On_Hand_Qty"
+                    ]
                 )
                 if stock_col:
                     inventory_df["Display_Stock"] = pd.to_numeric(inventory_df[stock_col], errors="coerce")
@@ -2261,7 +2277,7 @@ def main_app(user):
                 st.dataframe(
                     hot_inventory[
                         [
-                            "Brand", "Category", "Name", "Color", "Size", "Shopline_SKU",
+                            "Brand", "Category", "Name", "Color", "Size",
                             "Last_30D_Qty", "Last_30D_Revenue", "Display_Stock",
                             "Display_Updated_At", "Restock_Qty", "Display_Restock_Date"
                         ]
@@ -2274,7 +2290,6 @@ def main_app(user):
                         "Name": st.column_config.TextColumn("商品"),
                         "Color": st.column_config.TextColumn("顏色"),
                         "Size": st.column_config.TextColumn("尺寸"),
-                        "Shopline_SKU": st.column_config.TextColumn("Shopline SKU"),
                         "Last_30D_Qty": st.column_config.NumberColumn("近 30 天銷量"),
                         "Last_30D_Revenue": st.column_config.NumberColumn("近 30 天金額", format="$%d"),
                         "Display_Stock": st.column_config.NumberColumn("即時庫存"),
