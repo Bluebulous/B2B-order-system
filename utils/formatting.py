@@ -9,6 +9,11 @@ EXPECTED_COLS = {
     'wholesale_threshold': 'Wholesale_Threshold', 'shipping_threshold': 'Shipping_Threshold', 'discount': 'Discount',
     'username': 'Username', 'password': 'Password', 'dealer_name': 'Dealer_Name', 'contact_person': 'Contact_Person',
     'phone': 'Phone', 'address': 'Address', 'contact_email': 'Contact_Email', 'allowed_brands': 'Allowed_Brands',
+    'shopline_sku': 'Shopline_SKU', 'shopline_product_id': 'Shopline_Product_ID',
+    'shopline_stock': 'Shopline_Stock', 'current_stock': 'Current_Stock', 'stock': 'Stock',
+    'inventory': 'Inventory', 'inventory_qty': 'Inventory_Qty', 'available_quantity': 'Available_Quantity',
+    'stock_updated_at': 'Stock_Updated_At', 'restock_qty': 'Restock_Qty',
+    'expected_arrival_date': 'Expected_Arrival_Date', 'restock_date': 'Restock_Date',
     'order_id': 'Order_ID', 'order_time': 'Order_Time', 'customer_name': 'Customer_Name', 'email': 'Email',
     'items_json': 'Items_Json', 'subtotal': 'Subtotal', 'tax': 'Tax', 'shipping': 'Shipping', 'extra_discount': 'Extra_Discount',
     'total': 'Total', 'status': 'Status', 'tracking_number': 'Tracking_Number', 'admin_note': 'Admin_Note',
@@ -67,4 +72,3 @@ def display_status_badges(status_str):
         css_class = keywords.get(p, "badge-pending")
         badges_html += f'<span class="status-badge {css_class}">{escape_html(p)}</span>'
     return badges_html
-
