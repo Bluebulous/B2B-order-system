@@ -113,6 +113,154 @@ def build_recent_sales_summary(orders, days=30):
     )
 
 
+def apply_shopline_live_stock(inventory_df, shopline_stock_df, updated_at):
+    if shopline_stock_df is None or shopline_stock_df.empty:
+        return inventory_df
+
+    inventory_df = inventory_df.copy()
+    shopline_stock_df = shopline_stock_df.copy()
+    shopline_stock_df["Stock"] = pd.to_numeric(shopline_stock_df.get("Stock", pd.NA), errors="coerce")
+
+    matched = pd.Series(False, index=inventory_df.index)
+
+    if "Shopline_SKU" in inventory_df.columns and "Shopline_SKU" in shopline_stock_df.columns:
+        sku_stock = (
+            shopline_stock_df[shopline_stock_df["Shopline_SKU"].apply(clean_text) != ""]
+            .groupby("Shopline_SKU", as_index=False)["Stock"]
+            .sum()
+        )
+        if not sku_stock.empty:
+            sku_map = dict(zip(sku_stock["Shopline_SKU"].astype(str), sku_stock["Stock"]))
+            sku_values = inventory_df["Shopline_SKU"].astype(str).map(sku_map)
+            sku_matched = sku_values.notna()
+            inventory_df.loc[sku_matched, "Display_Stock"] = sku_values[sku_matched]
+            matched = matched | sku_matched
+
+    if "Shopline_Product_ID" in inventory_df.columns and "Shopline_Product_ID" in shopline_stock_df.columns:
+        product_stock = (
+            shopline_stock_df[shopline_stock_df["Shopline_Product_ID"].apply(clean_text) != ""]
+            .groupby("Shopline_Product_ID", as_index=False)["Stock"]
+            .sum()
+        )
+        if not product_stock.empty:
+            product_map = dict(zip(product_stock["Shopline_Product_ID"].astype(str), product_stock["Stock"]))
+            product_values = inventory_df["Shopline_Product_ID"].astype(str).map(product_map)
+            product_matched = product_values.notna() & ~matched
+            inventory_df.loc[product_matched, "Display_Stock"] = product_values[product_matched]
+            matched = matched | product_matched
+
+    if matched.any():
+        inventory_df.loc[matched, "Display_Updated_At"] = updated_at
+        inventory_df.loc[matched, "Stock_Source"] = "Shopline 即時"
+    return inventory_df
+
+
+def merge_shopline_variant_skus(shopline_stock_df, shopline_product_df):
+    if shopline_stock_df.empty or shopline_product_df.empty:
+        return shopline_stock_df
+    if not {"Shopline_Product_ID", "Variant_ID"}.issubset(shopline_stock_df.columns):
+        return shopline_stock_df
+
+    product_cols = ["Shopline_Product_ID", "Variant_ID", "Shopline_SKU"]
+    if not set(product_cols).issubset(shopline_product_df.columns):
+        return shopline_stock_df
+
+    merged_df = shopline_stock_df.merge(
+        shopline_product_df[product_cols].drop_duplicates(),
+        on=["Shopline_Product_ID", "Variant_ID"],
+        how="left",
+        suffixes=("", "_from_product"),
+    )
+    if "Shopline_SKU_from_product" in merged_df.columns:
+        merged_df["Shopline_SKU"] = merged_df["Shopline_SKU"].where(
+            merged_df["Shopline_SKU"].apply(clean_text) != "",
+            merged_df["Shopline_SKU_from_product"],
+        )
+        merged_df = merged_df.drop(columns=["Shopline_SKU_from_product"])
+    return merged_df
+
+
+def fetch_shopline_stock_snapshot(product_page_limit=100, per_page=100, stock_status=None, stock_progress=None):
+    all_products = []
+    for page in range(1, product_page_limit + 1):
+        if stock_status:
+            stock_status.info(f"正在讀取 Shopline 商品清單，第 {page} 頁...")
+        _, products = fetch_products(page=page, per_page=per_page)
+        if not products:
+            break
+        all_products.extend(products)
+        if len(products) < per_page:
+            break
+
+    shopline_product_df = normalize_products(all_products)
+    if shopline_product_df.empty:
+        return shopline_product_df, pd.DataFrame()
+
+    unique_products = (
+        shopline_product_df[["Shopline_Product_ID", "Shopline_Name"]]
+        .dropna()
+        .drop_duplicates()
+    )
+    unique_products = unique_products[unique_products["Shopline_Product_ID"].apply(clean_text) != ""]
+
+    stock_frames = []
+    total_products = len(unique_products)
+    for idx, (_, shopline_product) in enumerate(unique_products.iterrows(), start=1):
+        if stock_status:
+            stock_status.info(f"正在讀取庫存 {idx}/{total_products}：{shopline_product['Shopline_Name']}")
+        if stock_progress:
+            stock_progress.progress(idx / max(total_products, 1))
+        product_id = clean_text(shopline_product["Shopline_Product_ID"])
+        if not product_id:
+            continue
+        stock_payload, _ = fetch_product_stocks(product_id)
+        stock_df = normalize_stocks(product_id, shopline_product["Shopline_Name"], stock_payload)
+        if not stock_df.empty:
+            stock_frames.append(stock_df)
+
+    if not stock_frames:
+        return shopline_product_df, pd.DataFrame()
+    shopline_stock_df = pd.concat(stock_frames, ignore_index=True)
+    shopline_stock_df = merge_shopline_variant_skus(shopline_stock_df, shopline_product_df)
+    return shopline_product_df, shopline_stock_df
+
+
+def write_shopline_stock_to_supabase(inventory_df, shopline_stock_df, updated_at):
+    if shopline_stock_df.empty:
+        return {"matched": 0, "updated": 0, "failed": 0}
+
+    synced_inventory = apply_shopline_live_stock(inventory_df, shopline_stock_df, updated_at)
+    stock_rows = synced_inventory[
+        synced_inventory["Stock_Source"].eq("Shopline 即時")
+        & synced_inventory["Display_Stock"].notna()
+    ].copy()
+    if stock_rows.empty:
+        return {"matched": 0, "updated": 0, "failed": 0}
+
+    updated = 0
+    failed = 0
+    for _, row in stock_rows.iterrows():
+        stock_value = int(pd.to_numeric(row["Display_Stock"], errors="coerce"))
+        update_dict = {
+            "Current_Stock": stock_value,
+            "Stock_Updated_At": updated_at,
+        }
+        product_id = clean_text(row.get("Product_ID", ""))
+        shopline_sku = clean_text(row.get("Shopline_SKU", ""))
+        if product_id:
+            ok = update_data_by_id("products", "Product_ID", product_id, update_dict)
+        elif shopline_sku:
+            ok = update_data_by_id("products", "Shopline_SKU", shopline_sku, update_dict)
+        else:
+            ok = False
+        if ok:
+            updated += 1
+        else:
+            failed += 1
+
+    return {"matched": len(stock_rows), "updated": updated, "failed": failed}
+
+
 # --- 1. 系統設定 ---
 st.set_page_config(
     page_title="Bluebulous B2B",
@@ -2208,6 +2356,14 @@ def main_app(user):
                     inventory_df["Display_Updated_At"] = inventory_df[updated_col].apply(clean_text)
                 else:
                     inventory_df["Display_Updated_At"] = ""
+                inventory_df["Stock_Source"] = "Supabase"
+
+                if "shopline_live_stock_df" in st.session_state:
+                    inventory_df = apply_shopline_live_stock(
+                        inventory_df,
+                        st.session_state.get("shopline_live_stock_df"),
+                        st.session_state.get("shopline_live_stock_updated_at", ""),
+                    )
 
                 restock_date_col = first_existing_column(inventory_df, ["Expected_Arrival_Date", "Restock_Date"])
                 inventory_df["Display_Restock_Date"] = inventory_df[restock_date_col].apply(clean_text) if restock_date_col else ""
@@ -2279,7 +2435,7 @@ def main_app(user):
                         [
                             "Brand", "Category", "Name", "Color", "Size",
                             "Last_30D_Qty", "Last_30D_Revenue", "Display_Stock",
-                            "Display_Updated_At", "Restock_Qty", "Display_Restock_Date"
+                            "Display_Updated_At", "Stock_Source", "Restock_Qty", "Display_Restock_Date"
                         ]
                     ].head(200),
                     width="stretch",
@@ -2294,6 +2450,7 @@ def main_app(user):
                         "Last_30D_Revenue": st.column_config.NumberColumn("近 30 天金額", format="$%d"),
                         "Display_Stock": st.column_config.NumberColumn("即時庫存"),
                         "Display_Updated_At": st.column_config.TextColumn("庫存更新時間"),
+                        "Stock_Source": st.column_config.TextColumn("來源"),
                         "Restock_Qty": st.column_config.NumberColumn("未來補貨數量"),
                         "Display_Restock_Date": st.column_config.TextColumn("預計到貨日期"),
                     },
@@ -2327,51 +2484,85 @@ def main_app(user):
                             )
 
                 st.divider()
-                st.markdown("#### Shopline 同步檢查")
+                st.markdown("#### Shopline 庫存同步")
                 sync_col1, sync_col2 = st.columns([1, 2])
                 with sync_col1:
                     st.caption("環境變數需要設定 SHOPLINE_API_TOKEN 與 SHOPLINE_API_BASE_URL。")
                     st.write("狀態：", "已設定 Token" if is_shopline_configured() else "尚未設定 Token")
-                    fetch_limit = st.number_input("本次讀取 Shopline 商品數", min_value=5, max_value=100, value=20, step=5)
-                    fetch_stock_limit = st.number_input("本次讀取庫存的商品數", min_value=1, max_value=30, value=5, step=1)
-                    run_shopline_sync = st.button("🔄 測試讀取 Shopline 庫存", type="primary")
+                    st.caption("全量同步會讀取 Shopline 商品與庫存，並寫回 Supabase 的 Current_Stock 與 Stock_Updated_At。")
+                    run_full_shopline_sync = st.button("🔄 同步全部 Shopline 庫存", type="primary", width="stretch")
                 with sync_col2:
-                    if run_shopline_sync:
+                    if run_full_shopline_sync:
                         try:
-                            _, shopline_products = fetch_products(per_page=int(fetch_limit))
-                            _, shopline_warehouses = fetch_warehouses(per_page=50)
-                            shopline_product_df = normalize_products(shopline_products)
-                            shopline_warehouse_df = normalize_warehouses(shopline_warehouses)
-
-                            st.success(f"已讀取 Shopline 商品 {len(shopline_product_df)} 筆規格資料、倉庫 {len(shopline_warehouse_df)} 筆。")
-                            if not shopline_warehouse_df.empty:
-                                st.dataframe(
-                                    shopline_warehouse_df[["Warehouse_ID", "Warehouse", "Type"]],
-                                    width="stretch",
-                                    hide_index=True
-                                )
-
-                            stock_frames = []
-                            if not shopline_product_df.empty:
-                                unique_products = shopline_product_df[["Shopline_Product_ID", "Shopline_Name"]].drop_duplicates().head(int(fetch_stock_limit))
-                                for _, shopline_product in unique_products.iterrows():
-                                    product_id = clean_text(shopline_product["Shopline_Product_ID"])
-                                    if not product_id:
-                                        continue
-                                    stock_payload, _ = fetch_product_stocks(product_id)
-                                    stock_df = normalize_stocks(product_id, shopline_product["Shopline_Name"], stock_payload)
-                                    if not stock_df.empty:
-                                        stock_frames.append(stock_df)
-
-                            if stock_frames:
-                                shopline_stock_df = pd.concat(stock_frames, ignore_index=True)
-                                st.dataframe(shopline_stock_df, width="stretch", hide_index=True)
+                            if not is_shopline_configured():
+                                st.error("尚未設定 SHOPLINE_API_TOKEN")
                             else:
-                                st.info("已連線，但這次沒有解析到庫存明細。可能需要依 Shopline 實際回傳格式微調欄位解析。")
+                                sync_status = st.empty()
+                                sync_progress = st.progress(0)
+                                updated_at = datetime.now().strftime("%Y-%m-%d %H:%M")
+                                shopline_product_df, shopline_stock_df = fetch_shopline_stock_snapshot(
+                                    stock_status=sync_status,
+                                    stock_progress=sync_progress,
+                                )
+                                if shopline_stock_df.empty:
+                                    st.warning("已讀取 Shopline 商品，但沒有解析到庫存明細。需要依 Shopline 實際回傳格式調整。")
+                                else:
+                                    result = write_shopline_stock_to_supabase(inventory_df, shopline_stock_df, updated_at)
+                                    st.session_state.shopline_live_stock_df = shopline_stock_df
+                                    st.session_state.shopline_live_stock_updated_at = updated_at
+                                    sync_status.success(
+                                        f"同步完成：讀取 {len(shopline_product_df):,} 筆 Shopline 規格、"
+                                        f"{len(shopline_stock_df):,} 筆庫存；匹配 {result['matched']:,} 筆，"
+                                        f"寫回 {result['updated']:,} 筆，失敗 {result['failed']:,} 筆。"
+                                    )
+                                    get_products_data.clear()
+                                    st.cache_data.clear()
+                                    st.rerun()
                         except Exception as e:
-                            st.error(f"Shopline 讀取失敗: {e}")
+                            st.error(f"Shopline 全量同步失敗: {e}")
                     else:
-                        st.info("按下測試後，會用 Shopline API 讀取商品、倉庫與前幾筆商品庫存。正式寫回 Supabase 會等確認欄位後再開。")
+                        if "shopline_live_stock_df" in st.session_state:
+                            cached_stock = st.session_state.get("shopline_live_stock_df", pd.DataFrame())
+                            st.success(f"最近一次 Shopline 同步套用：{len(cached_stock):,} 筆，時間 {st.session_state.get('shopline_live_stock_updated_at', '')}")
+                        else:
+                            st.info("按下同步後，系統會讀取全部 Shopline 庫存並寫回 Supabase。完成後上方庫存表會直接顯示更新後資料。")
+
+                    with st.expander("進階：小批測試讀取"):
+                        fetch_limit = st.number_input("本次讀取 Shopline 商品數", min_value=5, max_value=100, value=20, step=5)
+                        fetch_stock_limit = st.number_input("本次讀取庫存的商品數", min_value=1, max_value=30, value=5, step=1)
+                        run_shopline_test = st.button("只測試讀取，不寫回 Supabase")
+                        if run_shopline_test:
+                            try:
+                                _, shopline_products = fetch_products(per_page=int(fetch_limit))
+                                _, shopline_warehouses = fetch_warehouses(per_page=50)
+                                shopline_product_df = normalize_products(shopline_products)
+                                shopline_warehouse_df = normalize_warehouses(shopline_warehouses)
+                                st.success(f"已讀取 Shopline 商品 {len(shopline_product_df)} 筆規格資料、倉庫 {len(shopline_warehouse_df)} 筆。")
+                                if not shopline_warehouse_df.empty:
+                                    st.dataframe(
+                                        shopline_warehouse_df[["Warehouse_ID", "Warehouse", "Type"]],
+                                        width="stretch",
+                                        hide_index=True
+                                    )
+                                stock_frames = []
+                                if not shopline_product_df.empty:
+                                    unique_products = shopline_product_df[["Shopline_Product_ID", "Shopline_Name"]].drop_duplicates().head(int(fetch_stock_limit))
+                                    for _, shopline_product in unique_products.iterrows():
+                                        product_id = clean_text(shopline_product["Shopline_Product_ID"])
+                                        if not product_id:
+                                            continue
+                                        stock_payload, _ = fetch_product_stocks(product_id)
+                                        stock_df = normalize_stocks(product_id, shopline_product["Shopline_Name"], stock_payload)
+                                        if not stock_df.empty:
+                                            stock_frames.append(stock_df)
+                                if stock_frames:
+                                    shopline_stock_df = pd.concat(stock_frames, ignore_index=True)
+                                    shopline_stock_df = merge_shopline_variant_skus(shopline_stock_df, shopline_product_df)
+                                    st.dataframe(shopline_stock_df, width="stretch", hide_index=True)
+                                else:
+                                    st.info("已連線，但這次沒有解析到庫存明細。")
+                            except Exception as e:
+                                st.error(f"Shopline 測試讀取失敗: {e}")
 
             except Exception as e:
                 st.error(f"庫存監測載入失敗: {e}")
