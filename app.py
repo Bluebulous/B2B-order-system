@@ -7,6 +7,15 @@ import time
 
 from config import ENABLE_DEFAULT_ADMIN, SHIPPING_FEE, TAX_RATE
 from services.email_service import send_order_email
+from services.shopline_service import (
+    fetch_product_stocks,
+    fetch_products,
+    fetch_warehouses,
+    is_shopline_configured,
+    normalize_products,
+    normalize_stocks,
+    normalize_warehouses,
+)
 from services.supabase_service import (
     delete_data_by_id,
     get_announcement,
@@ -29,6 +38,66 @@ def clean_text(value):
     if text.lower() in {"nan", "none", "null"}:
         return ""
     return text
+
+
+def first_existing_column(df, candidates):
+    for column in candidates:
+        if column in df.columns:
+            return column
+    return None
+
+
+def parse_order_items(items_json):
+    if isinstance(items_json, str):
+        try:
+            items_json = json.loads(items_json)
+        except Exception:
+            return []
+    if isinstance(items_json, dict):
+        return list(items_json.values())
+    if isinstance(items_json, list):
+        return items_json
+    return []
+
+
+def build_recent_sales_summary(orders, days=30):
+    if orders.empty or 'Items_Json' not in orders.columns:
+        return pd.DataFrame()
+
+    orders = orders.copy()
+    orders['Order_Time_dt'] = pd.to_datetime(orders.get('Order_Time', ''), errors='coerce')
+    cutoff = pd.Timestamp.now() - pd.Timedelta(days=days)
+    recent_orders = orders[orders['Order_Time_dt'].notna() & (orders['Order_Time_dt'] >= cutoff)]
+    rows = []
+
+    for _, order in recent_orders.iterrows():
+        for item in parse_order_items(order.get('Items_Json', {})):
+            qty = pd.to_numeric(item.get('qty', 0), errors='coerce')
+            if pd.isna(qty):
+                qty = 0
+            subtotal = pd.to_numeric(item.get('final_subtotal', 0), errors='coerce')
+            if pd.isna(subtotal):
+                final_price = pd.to_numeric(item.get('final_price', item.get('price', 0)), errors='coerce')
+                subtotal = (0 if pd.isna(final_price) else final_price) * qty
+            rows.append({
+                "Product_ID": clean_text(item.get("id") or item.get("product_id") or item.get("Product_ID")),
+                "Name": clean_text(item.get("name") or item.get("Name")),
+                "Spec": clean_text(item.get("spec") or item.get("Spec")),
+                "Brand": clean_text(item.get("brand") or item.get("Brand")),
+                "Category": clean_text(item.get("category") or item.get("Category")),
+                "Last_30D_Qty": int(qty),
+                "Last_30D_Revenue": int(subtotal),
+            })
+
+    if not rows:
+        return pd.DataFrame()
+
+    sales = pd.DataFrame(rows)
+    group_cols = ["Product_ID", "Name", "Spec", "Brand", "Category"]
+    return sales.groupby(group_cols, dropna=False, as_index=False).agg(
+        Last_30D_Qty=("Last_30D_Qty", "sum"),
+        Last_30D_Revenue=("Last_30D_Revenue", "sum"),
+    )
 
 
 # --- 1. 系統設定 ---
@@ -1345,7 +1414,7 @@ def main_app(user):
             return
 
         st.title("🔧 管理員後台")
-        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📦 訂單管理", "⚙️ 品牌門檻設定", "👥 用戶權限管理", "📊 銷售數據中心", "📢 公告管理", "🕵️‍♂️ 足跡追蹤"])
+        tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["📦 訂單管理", "⚙️ 品牌門檻設定", "👥 用戶權限管理", "📊 銷售數據中心", "📦 庫存監測", "📢 公告管理", "🕵️‍♂️ 足跡追蹤"])
         
         with tab1:
             with st.container(border=True):
@@ -2095,8 +2164,205 @@ def main_app(user):
             except Exception as e:
                 st.error(f"數據分析載入失敗: {e}")
 
-        # 第五個 Tab: 公告管理
+        # 第五個 Tab: 庫存監測
         with tab5:
+            st.subheader("📦 庫存監測")
+            st.caption("近期熱銷以最近 30 天訂單計算；即時庫存優先讀取 Supabase 商品欄位，Shopline 同步可由右側手動觸發。")
+
+            try:
+                inventory_df = df_products.copy()
+                for column in [
+                    "Shopline_SKU", "Shopline_Product_ID", "Current_Stock", "Shopline_Stock",
+                    "Stock_Updated_At", "Restock_Qty", "Expected_Arrival_Date", "Restock_Date"
+                ]:
+                    if column not in inventory_df.columns:
+                        inventory_df[column] = ""
+
+                stock_col = first_existing_column(
+                    inventory_df,
+                    ["Shopline_Stock", "Current_Stock", "Stock", "Inventory", "Inventory_Qty", "Available_Quantity"]
+                )
+                if stock_col:
+                    inventory_df["Display_Stock"] = pd.to_numeric(inventory_df[stock_col], errors="coerce")
+                else:
+                    inventory_df["Display_Stock"] = pd.NA
+
+                updated_col = first_existing_column(inventory_df, ["Stock_Updated_At", "Updated_At", "Last_Synced_At"])
+                if updated_col:
+                    inventory_df["Display_Updated_At"] = inventory_df[updated_col].apply(clean_text)
+                else:
+                    inventory_df["Display_Updated_At"] = ""
+
+                restock_date_col = first_existing_column(inventory_df, ["Expected_Arrival_Date", "Restock_Date"])
+                inventory_df["Display_Restock_Date"] = inventory_df[restock_date_col].apply(clean_text) if restock_date_col else ""
+                inventory_df["Restock_Qty"] = pd.to_numeric(inventory_df.get("Restock_Qty", ""), errors="coerce")
+
+                orders_for_inventory = get_data("orders")
+                recent_sales = build_recent_sales_summary(orders_for_inventory, days=30)
+                if recent_sales.empty:
+                    inventory_df["Last_30D_Qty"] = 0
+                    inventory_df["Last_30D_Revenue"] = 0
+                else:
+                    merge_key = "Product_ID" if "Product_ID" in inventory_df.columns and "Product_ID" in recent_sales.columns else "Name"
+                    inventory_df[merge_key] = inventory_df[merge_key].astype(str)
+                    recent_sales[merge_key] = recent_sales[merge_key].astype(str)
+                    inventory_df = inventory_df.merge(
+                        recent_sales[[merge_key, "Last_30D_Qty", "Last_30D_Revenue"]],
+                        on=merge_key,
+                        how="left"
+                    )
+                    inventory_df["Last_30D_Qty"] = inventory_df["Last_30D_Qty"].fillna(0).astype(int)
+                    inventory_df["Last_30D_Revenue"] = inventory_df["Last_30D_Revenue"].fillna(0).astype(int)
+
+                max_updated_at = inventory_df["Display_Updated_At"].replace("", pd.NA).dropna()
+                last_update_text = max_updated_at.max() if not max_updated_at.empty else "尚未有庫存更新時間"
+                hot_sku_count = int((inventory_df["Last_30D_Qty"] > 0).sum())
+                low_stock_count = int((inventory_df["Display_Stock"].fillna(999999) <= 5).sum())
+                no_mapping_count = int(inventory_df["Shopline_SKU"].apply(clean_text).eq("").sum())
+
+                k1, k2, k3, k4 = st.columns(4)
+                k1.metric("近 30 天有銷售 SKU", f"{hot_sku_count:,}")
+                k2.metric("低庫存 SKU", f"{low_stock_count:,}")
+                k3.metric("未對應 Shopline SKU", f"{no_mapping_count:,}")
+                k4.metric("庫存更新時間", last_update_text)
+
+                st.divider()
+                filter_col1, filter_col2, filter_col3 = st.columns([1, 1, 1.4])
+                with filter_col1:
+                    selected_inventory_brand = st.selectbox(
+                        "品牌",
+                        ["全部"] + sorted(inventory_df["Brand"].dropna().astype(str).unique().tolist()),
+                        key="inventory_brand_filter",
+                    )
+                with filter_col2:
+                    selected_inventory_category = st.selectbox(
+                        "類別",
+                        ["全部"] + sorted(inventory_df["Category"].dropna().astype(str).unique().tolist()),
+                        key="inventory_category_filter",
+                    )
+                with filter_col3:
+                    inventory_keyword = st.text_input("搜尋品名 / SKU / 顏色 / 尺寸", key="inventory_keyword")
+
+                filtered_inventory = inventory_df.copy()
+                if selected_inventory_brand != "全部":
+                    filtered_inventory = filtered_inventory[filtered_inventory["Brand"].astype(str) == selected_inventory_brand]
+                if selected_inventory_category != "全部":
+                    filtered_inventory = filtered_inventory[filtered_inventory["Category"].astype(str) == selected_inventory_category]
+                if inventory_keyword:
+                    keyword = inventory_keyword.strip().lower()
+                    searchable_cols = [col for col in ["Name", "Brand", "Category", "Color", "Size", "Shopline_SKU"] if col in filtered_inventory.columns]
+                    mask = pd.Series(False, index=filtered_inventory.index)
+                    for col in searchable_cols:
+                        mask = mask | filtered_inventory[col].astype(str).str.lower().str.contains(keyword, na=False)
+                    filtered_inventory = filtered_inventory[mask]
+
+                hot_inventory = filtered_inventory.sort_values(["Last_30D_Qty", "Last_30D_Revenue"], ascending=False)
+                st.markdown("#### 近期熱銷產品與即時庫存")
+                st.dataframe(
+                    hot_inventory[
+                        [
+                            "Brand", "Category", "Name", "Color", "Size", "Shopline_SKU",
+                            "Last_30D_Qty", "Last_30D_Revenue", "Display_Stock",
+                            "Display_Updated_At", "Restock_Qty", "Display_Restock_Date"
+                        ]
+                    ].head(200),
+                    width="stretch",
+                    hide_index=True,
+                    column_config={
+                        "Brand": st.column_config.TextColumn("品牌"),
+                        "Category": st.column_config.TextColumn("類別"),
+                        "Name": st.column_config.TextColumn("商品"),
+                        "Color": st.column_config.TextColumn("顏色"),
+                        "Size": st.column_config.TextColumn("尺寸"),
+                        "Shopline_SKU": st.column_config.TextColumn("Shopline SKU"),
+                        "Last_30D_Qty": st.column_config.NumberColumn("近 30 天銷量"),
+                        "Last_30D_Revenue": st.column_config.NumberColumn("近 30 天金額", format="$%d"),
+                        "Display_Stock": st.column_config.NumberColumn("即時庫存"),
+                        "Display_Updated_At": st.column_config.TextColumn("庫存更新時間"),
+                        "Restock_Qty": st.column_config.NumberColumn("未來補貨數量"),
+                        "Display_Restock_Date": st.column_config.TextColumn("預計到貨日期"),
+                    },
+                )
+
+                st.divider()
+                st.markdown("#### 各品牌近期熱銷 TOP 5")
+                hot_by_brand = hot_inventory[hot_inventory["Last_30D_Qty"] > 0].copy()
+                if hot_by_brand.empty:
+                    st.info("最近 30 天尚無可分析的商品銷售資料。")
+                else:
+                    hot_by_brand["Rank"] = hot_by_brand.groupby("Brand")["Last_30D_Qty"].rank(method="first", ascending=False).astype(int)
+                    brand_panels = st.columns(3)
+                    for idx, (brand, group) in enumerate(hot_by_brand[hot_by_brand["Rank"] <= 5].groupby("Brand", sort=True)):
+                        rows_html = ""
+                        for _, hot_item in group.sort_values("Rank").iterrows():
+                            stock_text = "未填庫存" if pd.isna(hot_item["Display_Stock"]) else f"{int(hot_item['Display_Stock']):,} 件"
+                            rows_html += (
+                                "<div class='rank-row'>"
+                                f"<div><span class='rank-badge'>{int(hot_item['Rank'])}</span></div>"
+                                f"<div><div class='rank-product'>{escape_html(hot_item['Name'])}</div>"
+                                f"<div class='rank-meta'>{escape_html(hot_item['Color'])} / {escape_html(hot_item['Size'])}</div></div>"
+                                f"<div class='rank-number'>{int(hot_item['Last_30D_Qty']):,} 件</div>"
+                                f"<div class='rank-number'>{escape_html(stock_text)}</div>"
+                                "</div>"
+                            )
+                        with brand_panels[idx % 3]:
+                            st.markdown(
+                                f"<div class='rank-panel'><div class='rank-panel-title'>{escape_html(brand)}</div>{rows_html}</div>",
+                                unsafe_allow_html=True
+                            )
+
+                st.divider()
+                st.markdown("#### Shopline 同步檢查")
+                sync_col1, sync_col2 = st.columns([1, 2])
+                with sync_col1:
+                    st.caption("環境變數需要設定 SHOPLINE_API_TOKEN 與 SHOPLINE_API_BASE_URL。")
+                    st.write("狀態：", "已設定 Token" if is_shopline_configured() else "尚未設定 Token")
+                    fetch_limit = st.number_input("本次讀取 Shopline 商品數", min_value=5, max_value=100, value=20, step=5)
+                    fetch_stock_limit = st.number_input("本次讀取庫存的商品數", min_value=1, max_value=30, value=5, step=1)
+                    run_shopline_sync = st.button("🔄 測試讀取 Shopline 庫存", type="primary")
+                with sync_col2:
+                    if run_shopline_sync:
+                        try:
+                            _, shopline_products = fetch_products(per_page=int(fetch_limit))
+                            _, shopline_warehouses = fetch_warehouses(per_page=50)
+                            shopline_product_df = normalize_products(shopline_products)
+                            shopline_warehouse_df = normalize_warehouses(shopline_warehouses)
+
+                            st.success(f"已讀取 Shopline 商品 {len(shopline_product_df)} 筆規格資料、倉庫 {len(shopline_warehouse_df)} 筆。")
+                            if not shopline_warehouse_df.empty:
+                                st.dataframe(
+                                    shopline_warehouse_df[["Warehouse_ID", "Warehouse", "Type"]],
+                                    width="stretch",
+                                    hide_index=True
+                                )
+
+                            stock_frames = []
+                            if not shopline_product_df.empty:
+                                unique_products = shopline_product_df[["Shopline_Product_ID", "Shopline_Name"]].drop_duplicates().head(int(fetch_stock_limit))
+                                for _, shopline_product in unique_products.iterrows():
+                                    product_id = clean_text(shopline_product["Shopline_Product_ID"])
+                                    if not product_id:
+                                        continue
+                                    stock_payload, _ = fetch_product_stocks(product_id)
+                                    stock_df = normalize_stocks(product_id, shopline_product["Shopline_Name"], stock_payload)
+                                    if not stock_df.empty:
+                                        stock_frames.append(stock_df)
+
+                            if stock_frames:
+                                shopline_stock_df = pd.concat(stock_frames, ignore_index=True)
+                                st.dataframe(shopline_stock_df, width="stretch", hide_index=True)
+                            else:
+                                st.info("已連線，但這次沒有解析到庫存明細。可能需要依 Shopline 實際回傳格式微調欄位解析。")
+                        except Exception as e:
+                            st.error(f"Shopline 讀取失敗: {e}")
+                    else:
+                        st.info("按下測試後，會用 Shopline API 讀取商品、倉庫與前幾筆商品庫存。正式寫回 Supabase 會等確認欄位後再開。")
+
+            except Exception as e:
+                st.error(f"庫存監測載入失敗: {e}")
+
+        # 第六個 Tab: 公告管理
+        with tab6:
             st.subheader("📢 置頂公告設定")
             try:
                 announcement_df = get_data("announcements")
@@ -2114,8 +2380,8 @@ def main_app(user):
             except Exception as e:
                 st.error(f"讀取公告失敗: {e}")
 
-        # 第六個 Tab: 足跡追蹤
-        with tab6:
+        # 第七個 Tab: 足跡追蹤
+        with tab7:
             st.subheader("🕵️‍♂️ 系統日誌 (足跡追蹤)")
             st.info("這裡記錄了經銷商的登入與操作行為，協助您發現「棄單」狀況。\n(註：若有登入紀錄、有開始購物，但沒有結帳紀錄，即為潛在棄單)")
             
