@@ -1169,6 +1169,7 @@ def main_app(user):
         st.divider()
         
         if st.button("🔄 重整產品資料", width="stretch"):
+            get_products_data.clear()
             st.cache_data.clear()
             st.toast("資料已更新！正在重新載入...", icon="🔄")
             time.sleep(1)
