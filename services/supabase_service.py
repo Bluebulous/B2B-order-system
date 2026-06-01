@@ -24,7 +24,7 @@ def init_connection():
 supabase: Client = init_connection()
 
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=60)
 def get_products_data():
     try:
         response = supabase.table("products").select("*").execute()
@@ -159,4 +159,3 @@ def get_announcement():
         return ""
     except Exception:
         return ""
-
