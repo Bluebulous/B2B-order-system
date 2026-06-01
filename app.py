@@ -60,6 +60,61 @@ def first_populated_number_column(df, candidates):
     return fallback
 
 
+def size_sort_key(value):
+    text = clean_text(value).upper().replace(" ", "")
+    if not text or text == "-":
+        return (0, 0, text)
+
+    apparel_order = {
+        "XXXS": 10,
+        "3XS": 10,
+        "XXS": 20,
+        "2XS": 20,
+        "XS": 30,
+        "S": 40,
+        "M": 50,
+        "L": 60,
+        "XL": 70,
+        "1XL": 70,
+        "XXL": 80,
+        "2XL": 80,
+        "XXXL": 90,
+        "3XL": 90,
+        "XXXXL": 100,
+        "4XL": 100,
+    }
+    if text in apparel_order:
+        return (1, apparel_order[text], text)
+
+    numeric_part = ""
+    for char in text:
+        if char.isdigit() or char == ".":
+            numeric_part += char
+        elif numeric_part:
+            break
+    if numeric_part:
+        try:
+            return (2, float(numeric_part), text)
+        except ValueError:
+            pass
+
+    return (3, 0, text)
+
+
+def sort_product_variants(df):
+    if df.empty or "Size" not in df.columns:
+        return df
+    sorted_df = df.copy()
+    sorted_df["_Size_Sort_Key"] = sorted_df["Size"].apply(size_sort_key)
+    sort_cols = ["_Size_Sort_Key"]
+    if "Color" in sorted_df.columns:
+        sort_cols = ["Color"] + sort_cols
+    if "Product_ID" in sorted_df.columns:
+        sort_cols.append("Product_ID")
+    sorted_df = sorted_df.sort_values(sort_cols, kind="stable").drop(columns=["_Size_Sort_Key"])
+    return sorted_df
+
+
 def parse_order_items(items_json):
     if isinstance(items_json, str):
         try:
@@ -2689,9 +2744,10 @@ def main_app(user):
         with st.container(border=True):
             st.markdown(f"<div class='product-title'>{escape_html(current_name)}</div>", unsafe_allow_html=True)
             st.markdown(f"<span class='brand-pill'>Brand: {escape_html(current_product_data.iloc[0]['Brand'])}</span>", unsafe_allow_html=True)
-            available_colors = current_product_data['Color'].unique()
+            current_product_data = sort_product_variants(current_product_data)
+            available_colors = current_product_data['Color'].dropna().unique()
             selected_color = st.selectbox("顏色", available_colors, key=f"color_sel_{current_name}")
-            variants = current_product_data[current_product_data['Color'] == selected_color]
+            variants = sort_product_variants(current_product_data[current_product_data['Color'] == selected_color])
             st.markdown("<br>", unsafe_allow_html=True)
             h1, h2, h3, h4 = st.columns([0.85, 1.25, 1.25, 0.95], vertical_alignment="center")
             h1.markdown("<div class='desktop-only table-head'>尺寸</div>", unsafe_allow_html=True)
