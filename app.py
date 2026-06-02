@@ -177,8 +177,18 @@ def filter_product_record(record, existing_columns):
         "Product_ID", "Name", "Category", "Brand", "Color", "Size",
         "Wholesale_Price", "Retail_Price", "Image_URL"
     }
-    allowed_columns = set(existing_columns) | core_columns
-    return {key: value for key, value in record.items() if key in allowed_columns}
+    existing_columns = set(existing_columns)
+    filtered = {}
+    for key, value in record.items():
+        if key in core_columns:
+            filtered[key] = value
+            continue
+        if key not in existing_columns:
+            continue
+        if isinstance(value, str) and clean_text(value) == "":
+            continue
+        filtered[key] = value
+    return filtered
 
 
 def parse_order_items(items_json):
