@@ -3,7 +3,9 @@ import pandas as pd
 import altair as alt
 from datetime import datetime
 import json
+import re
 import time
+from uuid import uuid4
 
 from config import ENABLE_DEFAULT_ADMIN, SHIPPING_FEE, TAX_RATE
 from services.email_service import send_order_email
@@ -113,6 +115,70 @@ def sort_product_variants(df):
         sort_cols.append("Product_ID")
     sorted_df = sorted_df.sort_values(sort_cols, kind="stable").drop(columns=["_Size_Sort_Key"])
     return sorted_df
+
+
+def split_batch_values(value):
+    text = clean_text(value).replace("，", ",").replace("、", ",")
+    if not text:
+        return [""]
+    parts = []
+    for line in text.splitlines():
+        for item in line.split(","):
+            cleaned = item.strip()
+            if cleaned:
+                parts.append(cleaned)
+    return list(dict.fromkeys(parts)) or [""]
+
+
+def slug_text(value):
+    text = clean_text(value).lower()
+    text = re.sub(r"[^a-z0-9]+", "-", text)
+    return text.strip("-")
+
+
+def make_product_id(name, color, size, prefix=""):
+    prefix_slug = slug_text(prefix) or slug_text(name) or "product"
+    color_slug = slug_text(color) or "default"
+    size_slug = slug_text(size) or "size"
+    return f"{prefix_slug}-{color_slug}-{size_slug}-{uuid4().hex[:6]}"
+
+
+def make_shopline_sku(prefix, color, size):
+    prefix_slug = slug_text(prefix)
+    if not prefix_slug:
+        return ""
+    color_slug = slug_text(color) or "default"
+    size_slug = slug_text(size) or "size"
+    return f"{prefix_slug}-{color_slug}-{size_slug}".upper()
+
+
+def normalize_product_record(record):
+    text_fields = [
+        "Product_ID", "Name", "Category", "Brand", "Color", "Size", "Image_URL",
+        "Shopline_SKU", "Shopline_Product_ID", "Stock_Updated_At", "Expected_Arrival_Date", "Restock_Date"
+    ]
+    number_fields = [
+        "Wholesale_Price", "Retail_Price", "Current_Stock", "Shopline_Stock",
+        "Restock_Qty", "Inventory", "Inventory_Qty", "Available_Quantity"
+    ]
+    output = {}
+    for field in text_fields:
+        if field in record:
+            output[field] = clean_text(record.get(field, ""))
+    for field in number_fields:
+        if field in record:
+            parsed = pd.to_numeric(record.get(field, 0), errors="coerce")
+            output[field] = 0 if pd.isna(parsed) else int(parsed)
+    return output
+
+
+def filter_product_record(record, existing_columns):
+    core_columns = {
+        "Product_ID", "Name", "Category", "Brand", "Color", "Size",
+        "Wholesale_Price", "Retail_Price", "Image_URL"
+    }
+    allowed_columns = set(existing_columns) | core_columns
+    return {key: value for key, value in record.items() if key in allowed_columns}
 
 
 def parse_order_items(items_json):
@@ -1631,7 +1697,7 @@ def main_app(user):
             return
 
         st.title("🔧 管理員後台")
-        tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["📦 訂單管理", "⚙️ 品牌門檻設定", "👥 用戶權限管理", "📊 銷售數據中心", "📦 庫存監測", "📢 公告管理", "🕵️‍♂️ 足跡追蹤"])
+        tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(["📦 訂單管理", "⚙️ 品牌門檻設定", "👥 用戶權限管理", "🧾 商品管理", "📊 銷售數據中心", "📦 庫存監測", "📢 公告管理", "🕵️‍♂️ 足跡追蹤"])
         
         with tab1:
             with st.container(border=True):
@@ -1944,6 +2010,198 @@ def main_app(user):
                 st.error(f"讀取用戶資料失敗: {e}")
 
         with tab4:
+            st.subheader("🧾 商品管理")
+            st.caption("可以直接編輯既有 SKU，也可以用同一個產品資料批次新增多個顏色與尺寸。")
+
+            try:
+                product_admin_df = get_products_data().copy()
+                actual_product_columns = set(product_admin_df.columns)
+                product_admin_cols = [
+                    "Product_ID", "Name", "Category", "Brand", "Color", "Size",
+                    "Wholesale_Price", "Retail_Price", "Image_URL",
+                    "Shopline_SKU", "Shopline_Product_ID", "Current_Stock",
+                    "Stock_Updated_At", "Restock_Qty", "Expected_Arrival_Date"
+                ]
+                for col in product_admin_cols:
+                    if col not in product_admin_df.columns:
+                        product_admin_df[col] = ""
+
+                st.markdown("#### 編輯現有商品")
+                edit_filter_1, edit_filter_2, edit_filter_3 = st.columns([1, 1, 1.4])
+                with edit_filter_1:
+                    edit_brand_filter = st.selectbox(
+                        "品牌篩選",
+                        ["全部"] + sorted(product_admin_df["Brand"].dropna().astype(str).unique().tolist()),
+                        key="product_admin_brand_filter",
+                    )
+                with edit_filter_2:
+                    edit_category_filter = st.selectbox(
+                        "類別篩選",
+                        ["全部"] + sorted(product_admin_df["Category"].dropna().astype(str).unique().tolist()),
+                        key="product_admin_category_filter",
+                    )
+                with edit_filter_3:
+                    edit_keyword = st.text_input("搜尋商品 / 顏色 / 尺寸 / SKU", key="product_admin_keyword")
+
+                editable_products = product_admin_df.copy()
+                if edit_brand_filter != "全部":
+                    editable_products = editable_products[editable_products["Brand"].astype(str) == edit_brand_filter]
+                if edit_category_filter != "全部":
+                    editable_products = editable_products[editable_products["Category"].astype(str) == edit_category_filter]
+                if edit_keyword:
+                    keyword = edit_keyword.strip().lower()
+                    search_cols = [col for col in ["Name", "Brand", "Category", "Color", "Size", "Shopline_SKU", "Product_ID"] if col in editable_products.columns]
+                    mask = pd.Series(False, index=editable_products.index)
+                    for col in search_cols:
+                        mask = mask | editable_products[col].astype(str).str.lower().str.contains(keyword, na=False)
+                    editable_products = editable_products[mask]
+
+                editable_products = sort_product_variants(editable_products[product_admin_cols]).reset_index(drop=True)
+                edited_products = st.data_editor(
+                    editable_products,
+                    width="stretch",
+                    hide_index=True,
+                    num_rows="fixed",
+                    key="product_admin_editor",
+                    column_config={
+                        "Product_ID": st.column_config.TextColumn("Product ID", disabled=True),
+                        "Name": st.column_config.TextColumn("商品名稱", required=True),
+                        "Category": st.column_config.TextColumn("類別", required=True),
+                        "Brand": st.column_config.TextColumn("品牌", required=True),
+                        "Color": st.column_config.TextColumn("顏色"),
+                        "Size": st.column_config.TextColumn("尺寸"),
+                        "Wholesale_Price": st.column_config.NumberColumn("批發價", min_value=0, format="$%d"),
+                        "Retail_Price": st.column_config.NumberColumn("零售價", min_value=0, format="$%d"),
+                        "Image_URL": st.column_config.TextColumn("圖片 URL"),
+                        "Shopline_SKU": st.column_config.TextColumn("Shopline SKU"),
+                        "Shopline_Product_ID": st.column_config.TextColumn("Shopline Product ID"),
+                        "Current_Stock": st.column_config.NumberColumn("庫存", min_value=0, format="%d"),
+                        "Stock_Updated_At": st.column_config.TextColumn("庫存更新時間"),
+                        "Restock_Qty": st.column_config.NumberColumn("補貨數量", min_value=0, format="%d"),
+                        "Expected_Arrival_Date": st.column_config.TextColumn("預計到貨日"),
+                    }
+                )
+
+                if st.button("💾 儲存目前篩選結果的商品修改", type="primary"):
+                    updated_count = 0
+                    failed_count = 0
+                    for _, edited_row in edited_products.iterrows():
+                        product_id = clean_text(edited_row.get("Product_ID", ""))
+                        if not product_id:
+                            continue
+                        original_match = product_admin_df[product_admin_df["Product_ID"].astype(str) == product_id]
+                        if original_match.empty:
+                            continue
+                        update_dict = normalize_product_record(edited_row.to_dict())
+                        update_dict.pop("Product_ID", None)
+                        update_dict = filter_product_record(update_dict, actual_product_columns)
+                        if update_data_by_id("products", "Product_ID", product_id, update_dict):
+                            updated_count += 1
+                        else:
+                            failed_count += 1
+                    get_products_data.clear()
+                    st.cache_data.clear()
+                    st.success(f"商品修改已儲存：成功 {updated_count} 筆，失敗 {failed_count} 筆。")
+                    time.sleep(1)
+                    st.rerun()
+
+                st.divider()
+                st.markdown("#### 批次新增同產品規格")
+
+                template_options = ["不使用模板"]
+                if not product_admin_df.empty:
+                    template_options += sorted(product_admin_df["Name"].dropna().astype(str).unique().tolist())
+                template_name = st.selectbox("以現有商品作為模板", template_options, key="batch_product_template")
+                template_row = {}
+                if template_name != "不使用模板":
+                    matches = product_admin_df[product_admin_df["Name"].astype(str) == template_name]
+                    if not matches.empty:
+                        template_row = matches.iloc[0].to_dict()
+
+                with st.form("batch_create_products_form"):
+                    b1, b2, b3 = st.columns(3)
+                    product_name = b1.text_input("商品名稱", value=clean_text(template_row.get("Name", "")))
+                    product_category = b2.text_input("類別", value=clean_text(template_row.get("Category", "")))
+                    product_brand = b3.text_input("品牌", value=clean_text(template_row.get("Brand", "")))
+
+                    p1, p2 = st.columns(2)
+                    template_wholesale = pd.to_numeric(template_row.get("Wholesale_Price", 0), errors="coerce")
+                    template_retail = pd.to_numeric(template_row.get("Retail_Price", 0), errors="coerce")
+                    wholesale_price = p1.number_input(
+                        "批發價",
+                        min_value=0,
+                        value=0 if pd.isna(template_wholesale) else int(template_wholesale),
+                        step=10,
+                    )
+                    retail_price = p2.number_input(
+                        "零售價",
+                        min_value=0,
+                        value=0 if pd.isna(template_retail) else int(template_retail),
+                        step=10,
+                    )
+
+                    image_url = st.text_input("圖片 URL", value=clean_text(template_row.get("Image_URL", "")))
+                    colors_text = st.text_area("顏色，可用逗號或換行分隔", value=clean_text(template_row.get("Color", "")) or "-")
+                    sizes_text = st.text_area("尺寸，可用逗號或換行分隔", value=clean_text(template_row.get("Size", "")) or "-")
+
+                    s1, s2 = st.columns(2)
+                    product_id_prefix = s1.text_input("Product ID 前綴（可留空自動產生）", value=slug_text(product_name))
+                    shopline_sku_prefix = s2.text_input("Shopline SKU 前綴（可留空，之後再補）")
+                    shopline_product_id = st.text_input("Shopline Product ID（同一商品可共用，可留空）", value=clean_text(template_row.get("Shopline_Product_ID", "")))
+
+                    submitted_batch_create = st.form_submit_button("➕ 批次新增商品規格", type="primary")
+                    if submitted_batch_create:
+                        if not product_name or not product_category or not product_brand:
+                            st.error("商品名稱、類別、品牌為必填。")
+                        else:
+                            colors = split_batch_values(colors_text)
+                            sizes = split_batch_values(sizes_text)
+                            created_count = 0
+                            failed_count = 0
+                            preview_records = []
+                            existing_ids = set(product_admin_df["Product_ID"].dropna().astype(str).tolist())
+                            for color in colors:
+                                for size in sizes:
+                                    new_product_id = make_product_id(product_name, color, size, product_id_prefix)
+                                    while new_product_id in existing_ids:
+                                        new_product_id = make_product_id(product_name, color, size, product_id_prefix)
+                                    existing_ids.add(new_product_id)
+                                    record = {
+                                        "Product_ID": new_product_id,
+                                        "Name": product_name,
+                                        "Category": product_category,
+                                        "Brand": product_brand,
+                                        "Color": color,
+                                        "Size": size,
+                                        "Wholesale_Price": int(wholesale_price),
+                                        "Retail_Price": int(retail_price),
+                                        "Image_URL": image_url,
+                                        "Shopline_SKU": make_shopline_sku(shopline_sku_prefix, color, size),
+                                        "Shopline_Product_ID": shopline_product_id,
+                                        "Current_Stock": 0,
+                                        "Stock_Updated_At": "",
+                                        "Restock_Qty": 0,
+                                        "Expected_Arrival_Date": "",
+                                    }
+                                    insert_record = filter_product_record(normalize_product_record(record), actual_product_columns)
+                                    if insert_data("products", insert_record):
+                                        created_count += 1
+                                        preview_records.append(record)
+                                    else:
+                                        failed_count += 1
+
+                            get_products_data.clear()
+                            st.cache_data.clear()
+                            st.success(f"批次新增完成：成功 {created_count} 筆，失敗 {failed_count} 筆。")
+                            if preview_records:
+                                st.dataframe(pd.DataFrame(preview_records), width="stretch", hide_index=True)
+
+                st.caption("提醒：新增品牌後，如需限制通路可見品牌，請到「用戶權限管理」調整 Allowed_Brands。")
+
+            except Exception as e:
+                st.error(f"商品管理載入失敗: {e}")
+
+        with tab5:
             st.markdown(
                 """
                 <div class="dashboard-hero">
@@ -2381,8 +2639,8 @@ def main_app(user):
             except Exception as e:
                 st.error(f"數據分析載入失敗: {e}")
 
-        # 第五個 Tab: 庫存監測
-        with tab5:
+        # 第六個 Tab: 庫存監測
+        with tab6:
             st.subheader("📦 庫存監測")
             st.caption("近期熱銷以最近 30 天訂單計算；即時庫存優先讀取 Supabase 商品欄位，Shopline 同步可由右側手動觸發。")
 
@@ -2623,8 +2881,8 @@ def main_app(user):
             except Exception as e:
                 st.error(f"庫存監測載入失敗: {e}")
 
-        # 第六個 Tab: 公告管理
-        with tab6:
+        # 第七個 Tab: 公告管理
+        with tab7:
             st.subheader("📢 置頂公告設定")
             try:
                 announcement_df = get_data("announcements")
@@ -2642,8 +2900,8 @@ def main_app(user):
             except Exception as e:
                 st.error(f"讀取公告失敗: {e}")
 
-        # 第七個 Tab: 足跡追蹤
-        with tab7:
+        # 第八個 Tab: 足跡追蹤
+        with tab8:
             st.subheader("🕵️‍♂️ 系統日誌 (足跡追蹤)")
             st.info("這裡記錄了經銷商的登入與操作行為，協助您發現「棄單」狀況。\n(註：若有登入紀錄、有開始購物，但沒有結帳紀錄，即為潛在棄單)")
             
