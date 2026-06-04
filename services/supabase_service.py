@@ -1,5 +1,6 @@
 import os
 from datetime import datetime
+import re
 
 import pandas as pd
 import streamlit as st
@@ -70,24 +71,54 @@ def get_data(table_name):
         return pd.DataFrame()
 
 
+def _missing_schema_column(error):
+    message = str(error)
+    match = re.search(r"Could not find the '([^']+)' column", message)
+    if match:
+        return match.group(1)
+    return None
+
+
 def insert_data(table_name, data_dict):
-    try:
-        lower_dict = {k.lower(): v for k, v in data_dict.items()}
-        supabase.table(table_name).insert(lower_dict).execute()
-        return True
-    except Exception as e:
-        st.error(f"寫入 {table_name} 失敗: {e}")
-        return False
+    lower_dict = {k.lower(): v for k, v in data_dict.items()}
+    skipped_columns = []
+    for _ in range(8):
+        try:
+            supabase.table(table_name).insert(lower_dict).execute()
+            if skipped_columns:
+                st.warning(f"已略過不存在的欄位：{', '.join(skipped_columns)}，並完成寫入。")
+            return True
+        except Exception as e:
+            missing_col = _missing_schema_column(e)
+            if missing_col and missing_col in lower_dict:
+                skipped_columns.append(missing_col)
+                lower_dict.pop(missing_col, None)
+                continue
+            st.error(f"寫入 {table_name} 失敗: {e}")
+            return False
+    st.error(f"寫入 {table_name} 失敗：略過過多不存在欄位後仍無法寫入。")
+    return False
 
 
 def update_data_by_id(table_name, match_col, match_val, update_dict):
-    try:
-        lower_dict = {k.lower(): v for k, v in update_dict.items()}
-        supabase.table(table_name).update(lower_dict).eq(match_col.lower(), match_val).execute()
-        return True
-    except Exception as e:
-        st.error(f"更新 {table_name} 失敗: {e}")
-        return False
+    lower_dict = {k.lower(): v for k, v in update_dict.items()}
+    skipped_columns = []
+    for _ in range(8):
+        try:
+            supabase.table(table_name).update(lower_dict).eq(match_col.lower(), match_val).execute()
+            if skipped_columns:
+                st.warning(f"已略過不存在的欄位：{', '.join(skipped_columns)}，並完成更新。")
+            return True
+        except Exception as e:
+            missing_col = _missing_schema_column(e)
+            if missing_col and missing_col in lower_dict:
+                skipped_columns.append(missing_col)
+                lower_dict.pop(missing_col, None)
+                continue
+            st.error(f"更新 {table_name} 失敗: {e}")
+            return False
+    st.error(f"更新 {table_name} 失敗：略過過多不存在欄位後仍無法更新。")
+    return False
 
 
 def delete_data_by_id(table_name, match_col, match_val):
