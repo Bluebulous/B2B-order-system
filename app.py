@@ -155,6 +155,7 @@ def make_shopline_sku(prefix, color, size):
 def normalize_product_record(record):
     text_fields = [
         "Product_ID", "Name", "Category", "Brand", "Color", "Size", "Image_URL",
+        "Asset_URL",
         "Shopline_SKU", "Shopline_Product_ID", "Stock_Updated_At", "Expected_Arrival_Date", "Restock_Date"
     ]
     number_fields = [
@@ -2028,7 +2029,7 @@ def main_app(user):
                 actual_product_columns = set(product_admin_df.columns)
                 product_admin_cols = [
                     "Product_ID", "Name", "Category", "Brand", "Color", "Size",
-                    "Wholesale_Price", "Retail_Price", "Image_URL",
+                    "Wholesale_Price", "Retail_Price", "Image_URL", "Asset_URL",
                     "Shopline_SKU", "Shopline_Product_ID", "Current_Stock",
                     "Stock_Updated_At", "Restock_Qty", "Expected_Arrival_Date"
                 ]
@@ -2083,6 +2084,7 @@ def main_app(user):
                         "Wholesale_Price": st.column_config.NumberColumn("批發價", min_value=0, format="$%d"),
                         "Retail_Price": st.column_config.NumberColumn("零售價", min_value=0, format="$%d"),
                         "Image_URL": st.column_config.TextColumn("圖片 URL"),
+                        "Asset_URL": st.column_config.LinkColumn("素材連結"),
                         "Shopline_SKU": st.column_config.TextColumn("Shopline SKU"),
                         "Shopline_Product_ID": st.column_config.TextColumn("Shopline Product ID"),
                         "Current_Stock": st.column_config.NumberColumn("庫存", min_value=0, format="%d"),
@@ -2151,6 +2153,7 @@ def main_app(user):
                     )
 
                     image_url = st.text_input("圖片 URL", value=clean_text(template_row.get("Image_URL", "")))
+                    asset_url = st.text_input("素材下載連結", value=clean_text(template_row.get("Asset_URL", "")))
                     colors_text = st.text_area("顏色，可用逗號或換行分隔", value=clean_text(template_row.get("Color", "")) or "-")
                     sizes_text = st.text_area("尺寸，可用逗號或換行分隔", value=clean_text(template_row.get("Size", "")) or "-")
 
@@ -2186,6 +2189,7 @@ def main_app(user):
                                         "Wholesale_Price": int(wholesale_price),
                                         "Retail_Price": int(retail_price),
                                         "Image_URL": image_url,
+                                        "Asset_URL": asset_url,
                                         "Shopline_SKU": make_shopline_sku(shopline_sku_prefix, color, size),
                                         "Shopline_Product_ID": shopline_product_id,
                                         "Current_Stock": 0,
@@ -3013,6 +3017,14 @@ def main_app(user):
         with st.container(border=True):
             st.markdown(f"<div class='product-title'>{escape_html(current_name)}</div>", unsafe_allow_html=True)
             st.markdown(f"<span class='brand-pill'>Brand: {escape_html(current_product_data.iloc[0]['Brand'])}</span>", unsafe_allow_html=True)
+            if "Asset_URL" in current_product_data.columns:
+                asset_urls = [
+                    clean_text(url)
+                    for url in current_product_data["Asset_URL"].dropna().tolist()
+                    if clean_text(url)
+                ]
+                if asset_urls:
+                    st.link_button("素材下載", asset_urls[0], width="stretch")
             current_product_data = sort_product_variants(current_product_data)
             available_colors = current_product_data['Color'].dropna().unique()
             selected_color = st.selectbox("顏色", available_colors, key=f"color_sel_{current_name}")
