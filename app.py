@@ -601,6 +601,26 @@ st.markdown(
         font-weight: 700;
         margin-bottom: 18px;
     }
+    div[data-testid="stLinkButton"] a {
+        background: #d7ff4f !important;
+        border: 1px solid #d7ff4f !important;
+        color: #111111 !important;
+        border-radius: 8px !important;
+        min-height: 42px !important;
+        font-weight: 900 !important;
+        letter-spacing: 0 !important;
+        box-shadow: 0 10px 26px rgba(215, 255, 79, 0.18) !important;
+    }
+    div[data-testid="stLinkButton"] a:hover {
+        background: #ecff91 !important;
+        border-color: #ecff91 !important;
+        color: #111111 !important;
+        transform: translateY(-1px);
+    }
+    div[data-testid="stLinkButton"] a p {
+        color: #111111 !important;
+        font-weight: 900 !important;
+    }
     .section-heading {
         color: #f7f7f7 !important;
         font-size: 18px;
@@ -2352,25 +2372,38 @@ def main_app(user):
 
                     with c_chart2:
                         with st.container(border=True):
-                            st.markdown("<div class='dashboard-card-title'>每月營收與訂單數</div><div class='dashboard-card-caption'>同時看營收與訂單量，避免只看金額誤判</div>", unsafe_allow_html=True)
-                            monthly_sales = orders.groupby('Month', as_index=False).agg(
+                            st.markdown("<div class='dashboard-card-title'>每月採購趨勢</div><div class='dashboard-card-caption'>可查看全部通路，或切換單一通路的採購金額與訂單數</div>", unsafe_allow_html=True)
+                            dealer_trend_options = ["全部通路"] + sorted(orders["Customer_Name"].dropna().astype(str).unique().tolist())
+                            selected_dealer_trend = st.selectbox(
+                                "選擇通路",
+                                dealer_trend_options,
+                                key="admin_monthly_dealer_trend",
+                            )
+                            trend_orders = orders.copy()
+                            if selected_dealer_trend != "全部通路":
+                                trend_orders = trend_orders[trend_orders["Customer_Name"].astype(str) == selected_dealer_trend]
+
+                            monthly_sales = trend_orders.groupby('Month', as_index=False).agg(
                                 Revenue=('Total', 'sum'),
                                 Orders=('Order_ID', 'count')
                             )
-                            monthly_base = alt.Chart(monthly_sales).encode(x=alt.X('Month:N', title='月份'))
-                            monthly_bar = monthly_base.mark_bar(color="#d9ff74", cornerRadiusTopLeft=8, cornerRadiusTopRight=8).encode(
-                                y=alt.Y('Revenue:Q', title='營收'),
-                                tooltip=[
-                                    alt.Tooltip('Month:N', title='月份'),
-                                    alt.Tooltip('Revenue:Q', title='營收', format=','),
-                                    alt.Tooltip('Orders:Q', title='訂單數')
-                                ]
-                            )
-                            monthly_line = monthly_base.mark_line(point=True, color="#6ee7f9", strokeWidth=3).encode(
-                                y=alt.Y('Orders:Q', title='訂單數')
-                            )
-                            monthly_chart = (monthly_bar + monthly_line).resolve_scale(y='independent')
-                            st.altair_chart(style_chart(monthly_chart, 320), width="stretch")
+                            if monthly_sales.empty:
+                                st.info("這個通路目前沒有可分析的訂單資料。")
+                            else:
+                                monthly_base = alt.Chart(monthly_sales).encode(x=alt.X('Month:N', title='月份'))
+                                monthly_bar = monthly_base.mark_bar(color="#d9ff74", cornerRadiusTopLeft=8, cornerRadiusTopRight=8).encode(
+                                    y=alt.Y('Revenue:Q', title='採購金額'),
+                                    tooltip=[
+                                        alt.Tooltip('Month:N', title='月份'),
+                                        alt.Tooltip('Revenue:Q', title='採購金額', format=','),
+                                        alt.Tooltip('Orders:Q', title='訂單數')
+                                    ]
+                                )
+                                monthly_line = monthly_base.mark_line(point=True, color="#6ee7f9", strokeWidth=3).encode(
+                                    y=alt.Y('Orders:Q', title='訂單數')
+                                )
+                                monthly_chart = (monthly_bar + monthly_line).resolve_scale(y='independent')
+                                st.altair_chart(style_chart(monthly_chart, 320), width="stretch")
 
                     st.divider()
                     
