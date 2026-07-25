@@ -3447,6 +3447,9 @@ def login_page():
     with col2:
         st.markdown("<br><br><br>", unsafe_allow_html=True)
         st.markdown("## Bluebulous B2B 採購系統")
+        announcement = get_announcement()
+        if announcement and announcement.strip() != "":
+            st.info(f"📢 **公告：** {announcement}", icon="📢")
         st.warning("💡 建議使用 筆電 / 桌機 登入以獲得最佳體驗")
         with st.form("login"):
             u = st.text_input("Username / Email")
