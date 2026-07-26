@@ -442,16 +442,28 @@ st.markdown(
     }
 
     /* 5. Selectbox & Input 樣式 */
-    div[data-baseweb="select"] > div, div[data-baseweb="input"] > div, div[data-baseweb="textarea"] > div {
-        background-color: #f0f2f6 !important;
-        color: #000000 !important;
-        border-color: #ccc !important;
+    div[data-baseweb="select"] > div,
+    div[data-baseweb="select"] > div > div,
+    div[data-baseweb="input"] > div,
+    div[data-baseweb="textarea"] > div {
+        background-color: #f8fafc !important;
+        color: #111827 !important;
+        border-color: #d1d5db !important;
     }
-    div[data-baseweb="select"] div {
-        color: #000000 !important;
+    div[data-baseweb="select"] div,
+    div[data-baseweb="select"] span,
+    div[data-baseweb="select"] input,
+    div[data-baseweb="input"] input,
+    div[data-baseweb="textarea"] textarea,
+    input,
+    textarea {
+        color: #111827 !important;
+        -webkit-text-fill-color: #111827 !important;
+        caret-color: #111827 !important;
     }
-    input, textarea {
-        color: #000000 !important;
+    div[data-baseweb="select"] svg {
+        color: #374151 !important;
+        fill: #374151 !important;
     }
     
     /* 6. 按鈕樣式 (側邊欄) */
@@ -556,8 +568,9 @@ st.markdown(
 
     /* === 桌面採購篩選欄位 === */
     div[data-testid="stTextInput"] input {
-        color: #111111 !important;
-        caret-color: #111111 !important;
+        color: #111827 !important;
+        -webkit-text-fill-color: #111827 !important;
+        caret-color: #111827 !important;
         background-color: #f8fafc !important;
     }
     div[data-testid="stTextInput"] input::placeholder {
@@ -566,7 +579,13 @@ st.markdown(
     }
     div[data-baseweb="select"] > div {
         background-color: #f8fafc !important;
-        color: #111111 !important;
+        color: #111827 !important;
+    }
+    div[data-testid="stNumberInput"] input {
+        background-color: #f8fafc !important;
+        color: #111827 !important;
+        -webkit-text-fill-color: #111827 !important;
+        caret-color: #111827 !important;
     }
 
     /* === 桌面採購工作台視覺 === */
