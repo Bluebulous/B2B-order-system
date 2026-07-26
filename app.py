@@ -577,6 +577,32 @@ st.markdown(
         color: #6b7280 !important;
         opacity: 1 !important;
     }
+    div[data-testid="stSelectbox"] div[data-baseweb="select"],
+    div[data-testid="stSelectbox"] div[data-baseweb="select"] > div,
+    div[data-testid="stSelectbox"] div[data-baseweb="select"] > div > div,
+    div[data-testid="stSelectbox"] div[role="combobox"] {
+        background-color: #f8fafc !important;
+        color: #111827 !important;
+        border-color: #d1d5db !important;
+    }
+    div[data-testid="stSelectbox"] div[data-baseweb="select"] *,
+    div[data-testid="stSelectbox"] div[role="combobox"] * {
+        color: #111827 !important;
+        -webkit-text-fill-color: #111827 !important;
+    }
+    div[data-testid="stSelectbox"] svg {
+        color: #374151 !important;
+        fill: #374151 !important;
+    }
+    div[role="listbox"],
+    div[role="option"] {
+        background-color: #f8fafc !important;
+        color: #111827 !important;
+    }
+    div[role="option"] * {
+        color: #111827 !important;
+        -webkit-text-fill-color: #111827 !important;
+    }
     div[data-baseweb="select"] > div {
         background-color: #f8fafc !important;
         color: #111827 !important;
