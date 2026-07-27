@@ -1150,6 +1150,37 @@ st.markdown(
             display: none !important;
         }
     }
+
+    /* === 最終覆蓋：修正 Streamlit Selectbox 深底黑字 === */
+    div[data-testid="stSelectbox"] [data-baseweb="select"],
+    div[data-testid="stSelectbox"] [data-baseweb="select"] > div,
+    div[data-testid="stSelectbox"] [data-baseweb="select"] > div > div,
+    div[data-testid="stSelectbox"] div[role="combobox"] {
+        background-color: #262936 !important;
+        border-color: #343948 !important;
+        color: #f8fafc !important;
+    }
+    div[data-testid="stSelectbox"] [data-baseweb="select"] *,
+    div[data-testid="stSelectbox"] div[role="combobox"] *,
+    div[data-testid="stSelectbox"] input {
+        color: #f8fafc !important;
+        -webkit-text-fill-color: #f8fafc !important;
+        caret-color: #f8fafc !important;
+    }
+    div[data-testid="stSelectbox"] svg {
+        color: #f8fafc !important;
+        fill: #f8fafc !important;
+    }
+    div[role="listbox"],
+    div[role="option"] {
+        background-color: #262936 !important;
+        color: #f8fafc !important;
+    }
+    div[role="option"] *,
+    div[role="listbox"] * {
+        color: #f8fafc !important;
+        -webkit-text-fill-color: #f8fafc !important;
+    }
     </style>
     """,
     unsafe_allow_html=True
