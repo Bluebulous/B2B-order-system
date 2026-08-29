@@ -234,7 +234,8 @@ def get_active_shopping_credits(user):
     owner_mask = credits["_dealer_username"].eq(username)
     if dealer_name:
         owner_mask = owner_mask | credits["_dealer_name"].eq(dealer_name)
-    valid_expiry = credits["_expires_dt"].isna() | (credits["_expires_dt"].dt.date >= date.today())
+    today_ts = pd.Timestamp.today().normalize()
+    valid_expiry = credits["_expires_dt"].isna() | (credits["_expires_dt"] >= today_ts)
     active = credits[
         owner_mask
         & credits["_status"].isin(["active", ""])
@@ -3335,7 +3336,8 @@ def main_app(user):
                                 credits_df["Amount"] = pd.to_numeric(credits_df["Amount"], errors="coerce").fillna(0).astype(int)
                                 credits_df["Remaining_Amount"] = pd.to_numeric(credits_df["Remaining_Amount"], errors="coerce").fillna(0).astype(int)
                                 credits_df["_expires_dt"] = pd.to_datetime(credits_df["Expires_At"], errors="coerce")
-                                credits_df["_valid"] = credits_df["_expires_dt"].isna() | (credits_df["_expires_dt"].dt.date >= date.today())
+                                today_ts = pd.Timestamp.today().normalize()
+                                credits_df["_valid"] = credits_df["_expires_dt"].isna() | (credits_df["_expires_dt"] >= today_ts)
                                 active_credit_rows = credits_df[
                                     credits_df["Status"].astype(str).str.lower().isin(["active", ""])
                                     & credits_df["_valid"]
