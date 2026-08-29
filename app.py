@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import altair as alt
-from datetime import datetime
+from datetime import date, datetime, timedelta
 import json
 import re
 import time
@@ -203,6 +203,103 @@ def parse_order_items(items_json):
     if isinstance(items_json, list):
         return items_json
     return []
+
+
+def get_active_shopping_credits(user):
+    credits = get_data("shopping_credits")
+    if credits.empty:
+        return pd.DataFrame()
+
+    for col, default in [
+        ("Dealer_Username", ""),
+        ("Dealer_Name", ""),
+        ("Amount", 0),
+        ("Remaining_Amount", 0),
+        ("Expires_At", ""),
+        ("Status", "active"),
+        ("Note", ""),
+        ("Created_At", ""),
+    ]:
+        if col not in credits.columns:
+            credits[col] = default
+
+    username = clean_text(user.get("Username", "")).lower()
+    dealer_name = clean_text(user.get("Dealer_Name", "")).lower()
+    credits["Remaining_Amount"] = pd.to_numeric(credits["Remaining_Amount"], errors="coerce").fillna(0)
+    credits["_dealer_username"] = credits["Dealer_Username"].astype(str).str.strip().str.lower()
+    credits["_dealer_name"] = credits["Dealer_Name"].astype(str).str.strip().str.lower()
+    credits["_status"] = credits["Status"].astype(str).str.strip().str.lower()
+    credits["_expires_dt"] = pd.to_datetime(credits["Expires_At"], errors="coerce")
+
+    owner_mask = credits["_dealer_username"].eq(username)
+    if dealer_name:
+        owner_mask = owner_mask | credits["_dealer_name"].eq(dealer_name)
+    valid_expiry = credits["_expires_dt"].isna() | (credits["_expires_dt"].dt.date >= date.today())
+    active = credits[
+        owner_mask
+        & credits["_status"].isin(["active", ""])
+        & valid_expiry
+        & (credits["Remaining_Amount"] > 0)
+    ].copy()
+    if active.empty:
+        return pd.DataFrame()
+
+    active["_expiry_sort"] = active["_expires_dt"].fillna(pd.Timestamp.max)
+    sort_cols = ["_expiry_sort"]
+    if "created_at" in active.columns:
+        sort_cols.append("created_at")
+    elif "Created_At" in active.columns:
+        sort_cols.append("Created_At")
+    return active.sort_values(sort_cols, kind="stable")
+
+
+def get_shopping_credit_balance(user):
+    active = get_active_shopping_credits(user)
+    if active.empty:
+        return 0, active
+    return int(active["Remaining_Amount"].sum()), active
+
+
+def use_shopping_credits(user, requested_amount, order_id):
+    amount_left = int(max(0, requested_amount))
+    if amount_left <= 0:
+        return 0
+
+    active = get_active_shopping_credits(user)
+    if active.empty:
+        return 0
+
+    used_total = 0
+    dealer_username = clean_text(user.get("Username", ""))
+    dealer_name = clean_text(user.get("Dealer_Name", ""))
+
+    for _, credit in active.iterrows():
+        if amount_left <= 0:
+            break
+        credit_id = credit.get("id")
+        remaining = pd.to_numeric(credit.get("Remaining_Amount", 0), errors="coerce")
+        remaining = 0 if pd.isna(remaining) else int(remaining)
+        use_amount = min(remaining, amount_left)
+        if use_amount <= 0:
+            continue
+
+        new_remaining = remaining - use_amount
+        status = "used" if new_remaining <= 0 else "active"
+        if update_data_by_id("shopping_credits", "id", credit_id, {
+            "Remaining_Amount": new_remaining,
+            "Status": status,
+        }):
+            insert_data("shopping_credit_usages", {
+                "Order_ID": order_id,
+                "Dealer_Username": dealer_username,
+                "Dealer_Name": dealer_name,
+                "Credit_ID": int(credit_id),
+                "Amount_Used": int(use_amount),
+            })
+            used_total += use_amount
+            amount_left -= use_amount
+
+    return int(used_total)
 
 
 def build_recent_sales_summary(orders, days=30):
@@ -722,6 +819,26 @@ st.markdown(
         padding: 14px 16px;
         margin: 12px 0 14px 0;
     }
+    .credit-balance-card {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 14px;
+        color: #e9f8d9 !important;
+        background: linear-gradient(135deg, #24361f 0%, #171f16 100%);
+        border: 1px solid #d9ff74;
+        border-radius: 8px;
+        padding: 12px 14px;
+        margin: 12px 0 8px 0;
+        font-size: 13px;
+        font-weight: 800;
+    }
+    .credit-balance-card strong {
+        color: #d9ff74 !important;
+        font-size: 20px;
+        font-weight: 900;
+        white-space: nowrap;
+    }
     .cart-total-row {
         display: flex;
         justify-content: space-between;
@@ -1209,7 +1326,7 @@ def main_app(user):
         mobile_markers = ["iphone", "android", "mobile", "ipad", "ipod"]
         return any(marker in user_agent for marker in mobile_markers)
 
-    def calculate_cart_totals(extra_discount=0):
+    def calculate_cart_totals(extra_discount=0, shopping_credit_used=0):
         BRAND_RULES, _ = get_brand_rules()
         for item in st.session_state.cart.values():
             if 'brand' not in item: item['brand'] = "default"
@@ -1266,7 +1383,9 @@ def main_app(user):
             shipping = SHIPPING_FEE
             shipping_msg = f"運費 ${SHIPPING_FEE}"
 
-        grand_total = grand_total_subtotal + grand_total_tax + shipping - extra_discount
+        original_total = grand_total_subtotal + grand_total_tax + shipping - extra_discount
+        shopping_credit_used = min(int(max(0, shopping_credit_used)), int(max(0, original_total)))
+        grand_total = max(0, original_total - shopping_credit_used)
         return {
             "brand_groups": brand_groups,
             "is_order_free_shipping": is_order_free_shipping,
@@ -1274,6 +1393,8 @@ def main_app(user):
             "grand_total_tax": int(grand_total_tax),
             "shipping": int(shipping),
             "shipping_msg": shipping_msg,
+            "original_total": int(original_total),
+            "shopping_credit_used": int(shopping_credit_used),
             "grand_total": int(grand_total),
         }
 
@@ -1329,6 +1450,9 @@ def main_app(user):
         st.divider()
         st.markdown(f"### Hello, {user.get('Contact_Person', 'User')}")
         st.caption(f"單位: {user.get('Dealer_Name', 'Unknown')}")
+        sidebar_credit_balance, _ = get_shopping_credit_balance(user)
+        if sidebar_credit_balance > 0:
+            st.success(f"💳 可用購物金 ${sidebar_credit_balance:,}")
         st.divider()
         
         if st.session_state.cart:
@@ -1387,7 +1511,11 @@ def main_app(user):
         if not contact_email_input and "@" in str(user.get('Username', '')):
             contact_email_input = user['Username']
 
-        totals = calculate_cart_totals(extra_discount=0)
+        available_credit, _ = get_shopping_credit_balance(user)
+        requested_credit = int(st.session_state.get("checkout_shopping_credit", 0))
+        requested_credit = min(requested_credit, available_credit)
+        totals = calculate_cart_totals(extra_discount=0, shopping_credit_used=requested_credit)
+        st.session_state.checkout_shopping_credit = totals["shopping_credit_used"]
         review_rows = []
         for item in st.session_state.cart.values():
             review_rows.append({
@@ -1422,7 +1550,10 @@ def main_app(user):
             summary_html = "<div class='cart-total-box'>"
             for label, value in summary_rows:
                 summary_html += f"<div class='cart-total-row'><span>{escape_html(label)}</span><span>{escape_html(value)}</span></div>"
-            summary_html += f"<div class='cart-total-row final'><span>總計含稅</span><span>${totals['grand_total']:,}</span></div></div>"
+            if totals["shopping_credit_used"] > 0:
+                summary_html += f"<div class='cart-total-row'><span>購物金折抵</span><span>-${totals['shopping_credit_used']:,}</span></div>"
+                summary_html += f"<div class='cart-total-row'><span>折抵前總額</span><span>${totals['original_total']:,}</span></div>"
+            summary_html += f"<div class='cart-total-row final'><span>應付金額</span><span>${totals['grand_total']:,}</span></div></div>"
             st.markdown(summary_html, unsafe_allow_html=True)
 
         back_col, submit_col = st.columns([1, 2])
@@ -1458,6 +1589,9 @@ def main_app(user):
                     "Subtotal": int(totals['grand_total_subtotal']),
                     "Tax": int(totals['grand_total_tax']),
                     "Shipping": int(totals['shipping']),
+                    "Original_Total": int(totals['original_total']),
+                    "Shopping_Credit_Used": int(totals['shopping_credit_used']),
+                    "Payment_Due": int(totals['grand_total']),
                     "Total": int(totals['grand_total']),
                     "Status": "待處理",
                     "Extra_Discount": 0,
@@ -1467,6 +1601,17 @@ def main_app(user):
 
                 try:
                     if insert_data("orders", order_data):
+                        actual_credit_used = use_shopping_credits(user, totals["shopping_credit_used"], order_id)
+                        if actual_credit_used != totals["shopping_credit_used"]:
+                            final_total = max(0, int(totals["original_total"]) - int(actual_credit_used))
+                            order_data["Shopping_Credit_Used"] = int(actual_credit_used)
+                            order_data["Payment_Due"] = int(final_total)
+                            order_data["Total"] = int(final_total)
+                            update_data_by_id("orders", "Order_ID", order_id, {
+                                "Shopping_Credit_Used": int(actual_credit_used),
+                                "Payment_Due": int(final_total),
+                                "Total": int(final_total),
+                            })
                         log_system_event(user, "Checkout", f"Order ID: {order_id}")
                         st.success(f"訂單 {order_id} 已送出!")
                         with st.spinner("正在寄送確認信..."):
@@ -1477,6 +1622,7 @@ def main_app(user):
                         st.session_state.cart = {}
                         st.session_state.has_logged_cart_start = False
                         st.session_state.checkout_contact_email = ""
+                        st.session_state.checkout_shopping_credit = 0
                         time.sleep(1)
                         st.session_state.page = 'shop'
                         st.rerun()
@@ -1804,7 +1950,7 @@ def main_app(user):
             return
 
         st.title("🔧 管理員後台")
-        tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(["📦 訂單管理", "⚙️ 品牌門檻設定", "👥 用戶權限管理", "🧾 商品管理", "📊 銷售數據中心", "📦 庫存監測", "📢 公告管理", "🕵️‍♂️ 足跡追蹤"])
+        tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs(["📦 訂單管理", "⚙️ 品牌門檻設定", "👥 用戶權限管理", "🧾 商品管理", "📊 銷售數據中心", "📦 庫存監測", "📢 公告管理", "🕵️‍♂️ 足跡追蹤", "💳 購物金管理"])
         
         with tab1:
             with st.container(border=True):
@@ -1816,11 +1962,17 @@ def main_app(user):
                         if 'Tracking_Number' not in orders.columns: orders['Tracking_Number'] = ""
                         if 'Admin_Note' not in orders.columns: orders['Admin_Note'] = ""
                         if 'Extra_Discount' not in orders.columns: orders['Extra_Discount'] = 0
+                        if 'Original_Total' not in orders.columns: orders['Original_Total'] = 0
+                        if 'Shopping_Credit_Used' not in orders.columns: orders['Shopping_Credit_Used'] = 0
+                        if 'Payment_Due' not in orders.columns: orders['Payment_Due'] = 0
                         if 'Phone' not in orders.columns: orders['Phone'] = ""
                         if 'Address' not in orders.columns: orders['Address'] = ""
                         if 'Shipping_Address' not in orders.columns: orders['Shipping_Address'] = ""
                         if 'Recipient_Name' not in orders.columns: orders['Recipient_Name'] = ""
                         orders['Extra_Discount'] = orders['Extra_Discount'].fillna(0).astype(int)
+                        orders['Shopping_Credit_Used'] = pd.to_numeric(orders['Shopping_Credit_Used'], errors='coerce').fillna(0).astype(int)
+                        orders['Original_Total'] = pd.to_numeric(orders['Original_Total'], errors='coerce').fillna(0).astype(int)
+                        orders['Payment_Due'] = pd.to_numeric(orders['Payment_Due'], errors='coerce').fillna(0).astype(int)
 
                         user_contact_lookup = {}
                         try:
@@ -1909,7 +2061,12 @@ def main_app(user):
                                         sign = "-" if extra_disc_show > 0 else "+"
                                         color = "green" if extra_disc_show > 0 else "red"
                                         st.markdown(f"<span style='color:{color}'>**調整:** {sign}${abs(extra_disc_show)}</span>", unsafe_allow_html=True)
-                                    st.markdown(f"### Total: ${row['Total']}")
+                                    credit_show = int(row.get('Shopping_Credit_Used', 0))
+                                    if credit_show > 0:
+                                        original_total_show = int(row.get('Original_Total', 0)) or int(row.get('Subtotal', 0)) + int(row.get('Tax', 0)) + int(row.get('Shipping', 0)) - extra_disc_show
+                                        st.markdown(f"**折抵前:** ${original_total_show}")
+                                        st.markdown(f"<span style='color:#d9ff74'>**購物金折抵:** -${credit_show}</span>", unsafe_allow_html=True)
+                                    st.markdown(f"### 應付: ${row['Total']}")
                                     
                                     if st.button("✏️ 修改內容 (進入購物車)", key=f"admin_edit_{row['Order_ID']}", type="primary"):
                                         items_to_cart = row['Items_Json']
@@ -1972,13 +2129,19 @@ def main_app(user):
                                             org_sub = int(pd.to_numeric(row.get('Subtotal', 0), errors='coerce'))
                                             org_tax = int(pd.to_numeric(row.get('Tax', 0), errors='coerce'))
                                             org_ship = int(pd.to_numeric(row.get('Shipping', 0), errors='coerce'))
-                                            new_total = org_sub + org_tax + org_ship - int(new_discount)
+                                            credit_used = pd.to_numeric(row.get('Shopping_Credit_Used', 0), errors='coerce')
+                                            credit_used = 0 if pd.isna(credit_used) else int(credit_used)
+                                            original_total = org_sub + org_tax + org_ship - int(new_discount)
+                                            new_total = max(0, original_total - credit_used)
                                             
                                             update_dict = {
                                                 'Status': final_status_str,
                                                 'Tracking_Number': str(new_track),
                                                 'Admin_Note': str(new_note),
                                                 'Extra_Discount': int(new_discount),
+                                                'Original_Total': int(original_total),
+                                                'Shopping_Credit_Used': int(credit_used),
+                                                'Payment_Due': int(new_total),
                                                 'Total': new_total
                                             }
                                             
@@ -3055,6 +3218,177 @@ def main_app(user):
             except Exception as e:
                 st.error(f"讀取日誌失敗: {e}")
 
+        with tab9:
+            st.subheader("💳 購物金管理")
+            st.caption("可手動發放購物金給指定通路；到期日可留空。購物金只折抵應付金額，不影響 MOQ 與免運門檻。")
+
+            try:
+                users_df = get_data("users")
+                credits_df = get_data("shopping_credits")
+                usages_df = get_data("shopping_credit_usages")
+
+                if users_df.empty:
+                    st.warning("目前沒有通路資料，無法發放購物金。")
+                else:
+                    for col in ["Username", "Dealer_Name", "Contact_Person"]:
+                        if col not in users_df.columns:
+                            users_df[col] = ""
+                    dealer_options = []
+                    dealer_lookup = {}
+                    for _, user_row in users_df.iterrows():
+                        username_value = clean_text(user_row.get("Username", ""))
+                        if not username_value:
+                            continue
+                        label = f"{clean_text(user_row.get('Dealer_Name', '')) or username_value} ({username_value})"
+                        dealer_options.append(label)
+                        dealer_lookup[label] = user_row
+
+                    if not dealer_options:
+                        st.warning("目前沒有可發放購物金的通路帳號。")
+                        return
+
+                    grant_col, overview_col = st.columns([1, 1.35], gap="large")
+
+                    with grant_col:
+                        with st.container(border=True):
+                            st.markdown("#### 新增購物金")
+                            selected_dealer_label = st.selectbox("選擇通路", dealer_options, key="credit_grant_dealer")
+                            selected_dealer = dealer_lookup.get(selected_dealer_label, {})
+                            grant_amount = st.number_input("發放金額", min_value=0, value=1000, step=100, key="credit_grant_amount")
+                            no_expiry = st.checkbox("無期限", value=True, key="credit_no_expiry")
+                            expiry_date = st.date_input(
+                                "到期日",
+                                value=date.today() + timedelta(days=30),
+                                disabled=no_expiry,
+                                key="credit_expiry_date",
+                            )
+                            grant_note = st.text_area("備註", placeholder="例如：新品活動、售後補償、展場合作購物金", key="credit_grant_note")
+
+                            if st.button("發放購物金", type="primary", width="stretch"):
+                                if grant_amount <= 0:
+                                    st.error("發放金額必須大於 0。")
+                                elif not selected_dealer:
+                                    st.error("請先選擇通路。")
+                                else:
+                                    dealer_username = clean_text(selected_dealer.get("Username", ""))
+                                    dealer_name = clean_text(selected_dealer.get("Dealer_Name", ""))
+                                    record = {
+                                        "Dealer_Username": dealer_username,
+                                        "Dealer_Name": dealer_name,
+                                        "Amount": int(grant_amount),
+                                        "Remaining_Amount": int(grant_amount),
+                                        "Expires_At": None if no_expiry else expiry_date.isoformat(),
+                                        "Note": grant_note,
+                                        "Created_By": clean_text(user.get("Username", "")),
+                                        "Status": "active",
+                                    }
+                                    if insert_data("shopping_credits", record):
+                                        log_system_event(user, "Grant Shopping Credit", f"{dealer_name or dealer_username}: ${int(grant_amount)}")
+                                        st.success("購物金已發放。")
+                                        time.sleep(1)
+                                        st.rerun()
+
+                    with overview_col:
+                        with st.container(border=True):
+                            st.markdown("#### 通路購物金餘額")
+                            if credits_df.empty:
+                                st.info("目前尚未發放任何購物金。")
+                            else:
+                                for col, default in [
+                                    ("Dealer_Username", ""),
+                                    ("Dealer_Name", ""),
+                                    ("Amount", 0),
+                                    ("Remaining_Amount", 0),
+                                    ("Expires_At", ""),
+                                    ("Status", "active"),
+                                    ("Note", ""),
+                                    ("created_at", ""),
+                                ]:
+                                    if col not in credits_df.columns:
+                                        credits_df[col] = default
+                                credits_df["Amount"] = pd.to_numeric(credits_df["Amount"], errors="coerce").fillna(0).astype(int)
+                                credits_df["Remaining_Amount"] = pd.to_numeric(credits_df["Remaining_Amount"], errors="coerce").fillna(0).astype(int)
+                                credits_df["_expires_dt"] = pd.to_datetime(credits_df["Expires_At"], errors="coerce")
+                                credits_df["_valid"] = credits_df["_expires_dt"].isna() | (credits_df["_expires_dt"].dt.date >= date.today())
+                                active_credit_rows = credits_df[
+                                    credits_df["Status"].astype(str).str.lower().isin(["active", ""])
+                                    & credits_df["_valid"]
+                                    & (credits_df["Remaining_Amount"] > 0)
+                                ].copy()
+                                if active_credit_rows.empty:
+                                    st.info("目前沒有可用購物金餘額。")
+                                else:
+                                    balance_df = active_credit_rows.groupby(["Dealer_Name", "Dealer_Username"], dropna=False, as_index=False).agg(
+                                        Available_Credit=("Remaining_Amount", "sum"),
+                                        Grant_Count=("id", "count"),
+                                    )
+                                    st.dataframe(
+                                        balance_df.sort_values("Available_Credit", ascending=False),
+                                        width="stretch",
+                                        hide_index=True,
+                                        column_config={
+                                            "Dealer_Name": st.column_config.TextColumn("通路"),
+                                            "Dealer_Username": st.column_config.TextColumn("帳號"),
+                                            "Available_Credit": st.column_config.NumberColumn("可用購物金", format="$%d"),
+                                            "Grant_Count": st.column_config.NumberColumn("有效筆數", format="%d"),
+                                        },
+                                    )
+
+                    st.divider()
+
+                    st.markdown("#### 發放紀錄")
+                    if credits_df.empty:
+                        st.caption("尚無發放紀錄。")
+                    else:
+                        display_cols = [
+                            col for col in [
+                                "created_at", "Dealer_Name", "Dealer_Username", "Amount", "Remaining_Amount",
+                                "Expires_At", "Status", "Note", "Created_By"
+                            ] if col in credits_df.columns
+                        ]
+                        st.dataframe(
+                            credits_df[display_cols].sort_values(display_cols[0], ascending=False) if display_cols else credits_df,
+                            width="stretch",
+                            hide_index=True,
+                            column_config={
+                                "created_at": st.column_config.TextColumn("發放時間"),
+                                "Dealer_Name": st.column_config.TextColumn("通路"),
+                                "Dealer_Username": st.column_config.TextColumn("帳號"),
+                                "Amount": st.column_config.NumberColumn("發放金額", format="$%d"),
+                                "Remaining_Amount": st.column_config.NumberColumn("剩餘金額", format="$%d"),
+                                "Expires_At": st.column_config.TextColumn("到期日"),
+                                "Status": st.column_config.TextColumn("狀態"),
+                                "Note": st.column_config.TextColumn("備註"),
+                                "Created_By": st.column_config.TextColumn("建立者"),
+                            },
+                        )
+
+                    st.markdown("#### 使用紀錄")
+                    if usages_df.empty:
+                        st.caption("尚無使用紀錄。")
+                    else:
+                        usage_cols = [
+                            col for col in [
+                                "created_at", "Order_ID", "Dealer_Name", "Dealer_Username", "Credit_ID", "Amount_Used"
+                            ] if col in usages_df.columns
+                        ]
+                        st.dataframe(
+                            usages_df[usage_cols].sort_values(usage_cols[0], ascending=False) if usage_cols else usages_df,
+                            width="stretch",
+                            hide_index=True,
+                            column_config={
+                                "created_at": st.column_config.TextColumn("使用時間"),
+                                "Order_ID": st.column_config.TextColumn("訂單編號"),
+                                "Dealer_Name": st.column_config.TextColumn("通路"),
+                                "Dealer_Username": st.column_config.TextColumn("帳號"),
+                                "Credit_ID": st.column_config.NumberColumn("購物金 ID", format="%d"),
+                                "Amount_Used": st.column_config.NumberColumn("折抵金額", format="$%d"),
+                            },
+                        )
+
+            except Exception as e:
+                st.error(f"購物金管理載入失敗: {e}")
+
         return
 
     # 3. 商店頁
@@ -3369,7 +3703,30 @@ def main_app(user):
                         help="可以直接改變最後的結帳總金額"
                     )
 
-                grand_total = grand_total_subtotal + grand_total_tax + shipping - extra_discount
+                original_total = grand_total_subtotal + grand_total_tax + shipping - extra_discount
+                shopping_credit_used = 0
+                if not is_editing:
+                    available_credit, active_credits = get_shopping_credit_balance(user)
+                    if available_credit > 0:
+                        max_credit = min(int(available_credit), int(max(0, original_total)))
+                        current_credit_value = min(int(st.session_state.get("checkout_shopping_credit", 0)), max_credit)
+                        st.markdown(
+                            f"<div class='credit-balance-card'><div>可用購物金</div><strong>${available_credit:,}</strong></div>",
+                            unsafe_allow_html=True,
+                        )
+                        shopping_credit_used = st.number_input(
+                            "本次使用購物金",
+                            min_value=0,
+                            max_value=max_credit,
+                            value=current_credit_value,
+                            step=100,
+                            key="checkout_shopping_credit",
+                            help="購物金只會折抵最後應付金額，不影響 MOQ 與免運門檻判斷。",
+                        )
+                    else:
+                        st.session_state.checkout_shopping_credit = 0
+
+                grand_total = max(0, original_total - int(shopping_credit_used))
                 
                 summary_rows = [
                     ("小計 Subtotal", f"${grand_total_subtotal:,}"),
@@ -3384,7 +3741,11 @@ def main_app(user):
                     sign = "-" if extra_discount > 0 else "+"
                     summary_html += f"<div class='cart-total-row'><span>手動調整 Adjustment</span><span>{sign}${abs(extra_discount):,}</span></div>"
 
-                summary_html += f"<div class='cart-total-row final'><span>總計含稅</span><span>${grand_total:,}</span></div></div>"
+                if shopping_credit_used > 0:
+                    summary_html += f"<div class='cart-total-row'><span>購物金折抵</span><span>-${int(shopping_credit_used):,}</span></div>"
+                    summary_html += f"<div class='cart-total-row'><span>折抵前總額</span><span>${int(original_total):,}</span></div>"
+
+                summary_html += f"<div class='cart-total-row final'><span>應付金額</span><span>${grand_total:,}</span></div></div>"
                 st.markdown(summary_html, unsafe_allow_html=True)
                 st.markdown(
                     f"""
@@ -3468,6 +3829,9 @@ def main_app(user):
                         "Subtotal": int(grand_total_subtotal), 
                         "Tax": int(grand_total_tax), 
                         "Shipping": int(shipping), 
+                        "Original_Total": int(original_total),
+                        "Shopping_Credit_Used": int(shopping_credit_used),
+                        "Payment_Due": int(grand_total),
                         "Total": int(grand_total), 
                         "Status": c_status,
                         "Extra_Discount": int(extra_discount),
@@ -3485,6 +3849,9 @@ def main_app(user):
                                 "Subtotal": int(grand_total_subtotal),
                                 "Tax": int(grand_total_tax),
                                 "Shipping": int(shipping),
+                                "Original_Total": int(original_total),
+                                "Shopping_Credit_Used": int(shopping_credit_used),
+                                "Payment_Due": int(grand_total),
                                 "Total": int(grand_total),
                                 "Status": c_status,
                                 "Extra_Discount": int(extra_discount)
@@ -3511,6 +3878,7 @@ def main_app(user):
                         st.session_state.editing_order_id = None
                         st.session_state.editing_customer_info = None
                         st.session_state.has_logged_cart_start = False 
+                        st.session_state.checkout_shopping_credit = 0
                         time.sleep(1)
                         if is_admin(user): st.session_state.page = 'admin_orders'
                         else: st.session_state.page = 'shop'
