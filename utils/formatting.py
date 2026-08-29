@@ -17,7 +17,11 @@ EXPECTED_COLS = {
     'expected_arrival_date': 'Expected_Arrival_Date', 'restock_date': 'Restock_Date',
     'order_id': 'Order_ID', 'order_time': 'Order_Time', 'customer_name': 'Customer_Name', 'email': 'Email',
     'items_json': 'Items_Json', 'subtotal': 'Subtotal', 'tax': 'Tax', 'shipping': 'Shipping', 'extra_discount': 'Extra_Discount',
+    'original_total': 'Original_Total', 'shopping_credit_used': 'Shopping_Credit_Used', 'payment_due': 'Payment_Due',
     'total': 'Total', 'status': 'Status', 'tracking_number': 'Tracking_Number', 'admin_note': 'Admin_Note',
+    'dealer_username': 'Dealer_Username', 'amount': 'Amount', 'remaining_amount': 'Remaining_Amount',
+    'expires_at': 'Expires_At', 'note': 'Note', 'created_by': 'Created_By',
+    'credit_id': 'Credit_ID', 'amount_used': 'Amount_Used',
     'message': 'Message',
     'time': 'Time', 'dealer': 'Dealer', 'action': 'Action', 'details': 'Details'
 }
