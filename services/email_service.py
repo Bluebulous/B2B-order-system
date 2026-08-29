@@ -54,6 +54,8 @@ def send_order_email(order_data, cart_items, is_update=False):
         sign = "-" if extra_val > 0 else "+"
         color = "green" if extra_val > 0 else "red"
         extra_info += f"<p style='margin: 5px 0; color: {color};'><strong>🎁 額外調整:</strong> {sign}${abs(extra_val)}</p>"
+    if order_data.get('Shopping_Credit_Used') and int(order_data['Shopping_Credit_Used']) > 0:
+        extra_info += f"<p style='margin: 5px 0; color: #4f8a10;'><strong>💳 購物金折抵:</strong> -${escape_html(order_data['Shopping_Credit_Used'])}</p>"
 
     html_content = f"""
     <html>
