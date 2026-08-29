@@ -260,6 +260,26 @@ def get_shopping_credit_balance(user):
     return int(active["Remaining_Amount"].sum()), active
 
 
+def distribute_credit_by_brand(brand_groups, shopping_credit_used):
+    shopping_credit_used = int(max(0, shopping_credit_used))
+    total_raw = sum(int(data.get("raw_wholesale_total", 0)) for data in brand_groups.values())
+    allocated_total = 0
+    brand_names = list(brand_groups.keys())
+    for index, b_name in enumerate(brand_names):
+        raw_total = int(brand_groups[b_name].get("raw_wholesale_total", 0))
+        if shopping_credit_used <= 0 or total_raw <= 0:
+            allocated = 0
+        elif index == len(brand_names) - 1:
+            allocated = shopping_credit_used - allocated_total
+        else:
+            allocated = int(shopping_credit_used * raw_total / total_raw)
+            allocated_total += allocated
+        allocated = max(0, min(allocated, raw_total))
+        brand_groups[b_name]["shopping_credit_allocated"] = allocated
+        brand_groups[b_name]["threshold_total_after_credit"] = max(0, raw_total - allocated)
+    return brand_groups
+
+
 def use_shopping_credits(user, requested_amount, order_id):
     amount_left = int(max(0, requested_amount))
     if amount_left <= 0:
@@ -1341,6 +1361,10 @@ def main_app(user):
             brand_groups[b_name]['items'].append(item)
             brand_groups[b_name]['raw_wholesale_total'] += int(round(item['wholesale_price'] * item['qty']))
 
+        raw_order_total = sum(data["raw_wholesale_total"] for data in brand_groups.values())
+        shopping_credit_used = min(int(max(0, shopping_credit_used)), int(max(0, raw_order_total)))
+        brand_groups = distribute_credit_by_brand(brand_groups, shopping_credit_used)
+
         is_order_free_shipping = False
         grand_total_subtotal = 0
         grand_total_tax = 0
@@ -1352,7 +1376,9 @@ def main_app(user):
             w_threshold = rule.get('wholesale_threshold', 10000)
             s_threshold = rule.get('shipping_threshold', 10000)
 
-            if data['raw_wholesale_total'] >= w_threshold:
+            threshold_total = data.get('threshold_total_after_credit', data['raw_wholesale_total'])
+
+            if threshold_total >= w_threshold:
                 data['is_wholesale_qualified'] = True
                 brand_subtotal = data['raw_wholesale_total']
                 brand_tax = int(round(brand_subtotal * TAX_RATE))
@@ -1363,7 +1389,7 @@ def main_app(user):
                 for item in data['items']:
                     brand_subtotal += int(round(item['retail_price'] * d_rate)) * item['qty']
 
-            if data['raw_wholesale_total'] >= s_threshold:
+            if threshold_total >= s_threshold:
                 data['is_shipping_qualified'] = True
                 is_order_free_shipping = True
 
@@ -3220,7 +3246,7 @@ def main_app(user):
 
         with tab9:
             st.subheader("💳 購物金管理")
-            st.caption("可手動發放購物金給指定通路；到期日可留空。購物金只折抵應付金額，不影響 MOQ 與免運門檻。")
+            st.caption("可手動發放購物金給指定通路；到期日可留空。購物金會先折抵採購金額，再判斷 MOQ 與免運門檻。")
 
             try:
                 users_df = get_data("users")
@@ -3588,6 +3614,36 @@ def main_app(user):
                     brand_groups[b_name]['items'].append(item)
                     brand_groups[b_name]['raw_wholesale_total'] += int(round(item['wholesale_price'] * item['qty']))
 
+                is_editing = st.session_state.get('editing_order_id') is not None
+                default_discount = 0
+                if is_editing:
+                    default_discount = int(st.session_state.get('editing_customer_info', {}).get('Extra_Discount', 0))
+
+                raw_order_total = sum(data["raw_wholesale_total"] for data in brand_groups.values())
+                shopping_credit_used = 0
+                if not is_editing:
+                    available_credit, active_credits = get_shopping_credit_balance(user)
+                    if available_credit > 0:
+                        max_credit = min(int(available_credit), int(max(0, raw_order_total)))
+                        current_credit_value = min(int(st.session_state.get("checkout_shopping_credit", 0)), max_credit)
+                        st.markdown(
+                            f"<div class='credit-balance-card'><div>可用購物金</div><strong>${available_credit:,}</strong></div>",
+                            unsafe_allow_html=True,
+                        )
+                        shopping_credit_used = st.number_input(
+                            "本次使用購物金",
+                            min_value=0,
+                            max_value=max_credit,
+                            value=current_credit_value,
+                            step=100,
+                            key="checkout_shopping_credit",
+                            help="購物金會先折抵採購金額，再判斷 MOQ 與免運門檻。",
+                        )
+                    else:
+                        st.session_state.checkout_shopping_credit = 0
+
+                brand_groups = distribute_credit_by_brand(brand_groups, shopping_credit_used)
+
                 is_order_free_shipping = False 
                 grand_total_subtotal = 0
                 grand_total_tax = 0
@@ -3599,7 +3655,9 @@ def main_app(user):
                     w_threshold = rule.get('wholesale_threshold', 10000)
                     s_threshold = rule.get('shipping_threshold', 10000)
                     
-                    if data['raw_wholesale_total'] >= w_threshold:
+                    threshold_total = data.get('threshold_total_after_credit', data['raw_wholesale_total'])
+
+                    if threshold_total >= w_threshold:
                         data['is_wholesale_qualified'] = True
                         brand_subtotal = data['raw_wholesale_total']
                         brand_tax = int(round(brand_subtotal * TAX_RATE))
@@ -3610,7 +3668,7 @@ def main_app(user):
                         for item in data['items']:
                             brand_subtotal += int(round(item['retail_price'] * d_rate)) * item['qty']
 
-                    if data['raw_wholesale_total'] >= s_threshold:
+                    if threshold_total >= s_threshold:
                         data['is_shipping_qualified'] = True
                         is_order_free_shipping = True
                     
@@ -3627,16 +3685,20 @@ def main_app(user):
                     d_rate = rule.get('discount_rate', 0.7)
                     w_threshold = rule.get('wholesale_threshold', 10000)
                     s_threshold = rule.get('shipping_threshold', 10000)
-                    wholesale_remaining = max(0, int(w_threshold) - int(data['raw_wholesale_total']))
-                    shipping_remaining = max(0, int(s_threshold) - int(data['raw_wholesale_total']))
+                    threshold_total = data.get('threshold_total_after_credit', data['raw_wholesale_total'])
+                    credit_allocated = int(data.get('shopping_credit_allocated', 0))
+                    wholesale_remaining = max(0, int(w_threshold) - int(threshold_total))
+                    shipping_remaining = max(0, int(s_threshold) - int(threshold_total))
                     is_nonstop = str(b_name).strip().lower() == "non-stop dogwear"
                     
                     if data['is_wholesale_qualified']:
                         title = f"{escape_html(b_name)} | 已達批發門檻"
                         if data['is_shipping_qualified']:
-                            meta = f"小計 ${data['raw_wholesale_total']:,} | 已免運"
+                            meta = f"門檻金額 ${threshold_total:,} | 已免運"
                         else:
-                            meta = f"小計 ${data['raw_wholesale_total']:,} | 再 ${shipping_remaining:,} 免運"
+                            meta = f"門檻金額 ${threshold_total:,} | 再 ${shipping_remaining:,} 免運"
+                        if credit_allocated > 0:
+                            meta += f" | 已扣購物金 ${credit_allocated:,}"
                         st.markdown(
                             f"<div class='threshold-card ok'><div class='threshold-title'>{title}</div><div class='threshold-meta'>{escape_html(meta)}</div></div>",
                             unsafe_allow_html=True
@@ -3648,6 +3710,8 @@ def main_app(user):
                         else:
                             title = f"{escape_html(b_name)} | 未達出貨門檻"
                             meta = f"再 ${wholesale_remaining:,} 可出貨"
+                        if credit_allocated > 0:
+                            meta = f"門檻金額 ${threshold_total:,} | 已扣購物金 ${credit_allocated:,} | {meta}"
                         st.markdown(
                             f"<div class='threshold-card warn'><div class='threshold-title'>{title}</div><div class='threshold-meta'>{escape_html(meta)}</div></div>",
                             unsafe_allow_html=True
@@ -3687,11 +3751,6 @@ def main_app(user):
                     shipping = SHIPPING_FEE
                     shipping_msg = f"運費 ${SHIPPING_FEE}"
 
-                is_editing = st.session_state.get('editing_order_id') is not None
-                default_discount = 0
-                if is_editing:
-                    default_discount = int(st.session_state.get('editing_customer_info', {}).get('Extra_Discount', 0))
-
                 extra_discount = 0
                 if is_admin(user):
                     st.markdown("---")
@@ -3704,28 +3763,7 @@ def main_app(user):
                     )
 
                 original_total = grand_total_subtotal + grand_total_tax + shipping - extra_discount
-                shopping_credit_used = 0
-                if not is_editing:
-                    available_credit, active_credits = get_shopping_credit_balance(user)
-                    if available_credit > 0:
-                        max_credit = min(int(available_credit), int(max(0, original_total)))
-                        current_credit_value = min(int(st.session_state.get("checkout_shopping_credit", 0)), max_credit)
-                        st.markdown(
-                            f"<div class='credit-balance-card'><div>可用購物金</div><strong>${available_credit:,}</strong></div>",
-                            unsafe_allow_html=True,
-                        )
-                        shopping_credit_used = st.number_input(
-                            "本次使用購物金",
-                            min_value=0,
-                            max_value=max_credit,
-                            value=current_credit_value,
-                            step=100,
-                            key="checkout_shopping_credit",
-                            help="購物金只會折抵最後應付金額，不影響 MOQ 與免運門檻判斷。",
-                        )
-                    else:
-                        st.session_state.checkout_shopping_credit = 0
-
+                shopping_credit_used = min(int(max(0, shopping_credit_used)), int(max(0, original_total)))
                 grand_total = max(0, original_total - int(shopping_credit_used))
                 
                 summary_rows = [
