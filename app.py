@@ -3279,7 +3279,7 @@ def main_app(user):
                         with st.container(border=True):
                             st.markdown("#### 新增購物金")
                             selected_dealer_label = st.selectbox("選擇通路", dealer_options, key="credit_grant_dealer")
-                            selected_dealer = dealer_lookup.get(selected_dealer_label, {})
+                            selected_dealer = dealer_lookup.get(selected_dealer_label)
                             grant_amount = st.number_input("發放金額", min_value=0, value=1000, step=100, key="credit_grant_amount")
                             no_expiry = st.checkbox("無期限", value=True, key="credit_no_expiry")
                             expiry_date = st.date_input(
@@ -3293,7 +3293,7 @@ def main_app(user):
                             if st.button("發放購物金", type="primary", width="stretch"):
                                 if grant_amount <= 0:
                                     st.error("發放金額必須大於 0。")
-                                elif not selected_dealer:
+                                elif selected_dealer is None:
                                     st.error("請先選擇通路。")
                                 else:
                                     dealer_username = clean_text(selected_dealer.get("Username", ""))
