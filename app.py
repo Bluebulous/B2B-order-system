@@ -292,7 +292,7 @@ def rex_specs_goggle_unit_price(total_goggle_qty):
         return 1950
     if total_goggle_qty >= 6:
         return 1990
-    return 2060
+    return 2080
 
 
 def apply_rex_specs_pricing_to_group(data):
