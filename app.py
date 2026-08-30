@@ -261,6 +261,70 @@ def get_shopping_credit_balance(user):
     return int(active["Remaining_Amount"].sum()), active
 
 
+def is_rex_specs_brand(brand):
+    normalized = re.sub(r"[\s\-_]+", "", clean_text(brand).lower())
+    return normalized == "rexspecs"
+
+
+def rex_specs_item_type(item):
+    text = " ".join([
+        clean_text(item.get("id", "")),
+        clean_text(item.get("product_id", "")),
+        clean_text(item.get("Product_ID", "")),
+        clean_text(item.get("name", "")),
+        clean_text(item.get("Name", "")),
+        clean_text(item.get("category", "")),
+        clean_text(item.get("Category", "")),
+        clean_text(item.get("spec", "")),
+    ]).lower()
+    compact_text = re.sub(r"[\s\-_]+", "", text)
+    if "收納盒" in text or "case" in text:
+        return "case"
+    if "鏡片" in text or "lens" in text:
+        return "lens"
+    if "護目鏡" in text or "goggle" in text or "goggles" in text or "goggle" in compact_text:
+        return "goggle"
+    return "other"
+
+
+def rex_specs_goggle_unit_price(total_goggle_qty):
+    if total_goggle_qty >= 12:
+        return 1950
+    if total_goggle_qty >= 6:
+        return 1990
+    return 2060
+
+
+def apply_rex_specs_pricing_to_group(data):
+    goggle_qty = sum(
+        int(item.get("qty", 0))
+        for item in data.get("items", [])
+        if rex_specs_item_type(item) == "goggle"
+    )
+    goggle_price = rex_specs_goggle_unit_price(goggle_qty)
+    brand_subtotal = 0
+
+    for item in data.get("items", []):
+        item_type = rex_specs_item_type(item)
+        if item_type == "goggle":
+            unit_price = goggle_price
+        elif item_type == "case":
+            unit_price = 560
+        elif item_type == "lens":
+            unit_price = 310
+        else:
+            parsed_price = pd.to_numeric(item.get("wholesale_price", 0), errors="coerce")
+            unit_price = 0 if pd.isna(parsed_price) else int(parsed_price)
+        item["final_unit_price"] = int(unit_price)
+        item["final_subtotal"] = int(unit_price) * int(item.get("qty", 0))
+        brand_subtotal += item["final_subtotal"]
+
+    data["raw_wholesale_total"] = int(brand_subtotal)
+    data["rex_specs_goggle_qty"] = int(goggle_qty)
+    data["rex_specs_goggle_unit_price"] = int(goggle_price)
+    return data
+
+
 def distribute_credit_by_brand(brand_groups, shopping_credit_used):
     shopping_credit_used = int(max(0, shopping_credit_used))
     total_raw = sum(int(data.get("raw_wholesale_total", 0)) for data in brand_groups.values())
@@ -1362,6 +1426,10 @@ def main_app(user):
             brand_groups[b_name]['items'].append(item)
             brand_groups[b_name]['raw_wholesale_total'] += int(round(item['wholesale_price'] * item['qty']))
 
+        for b_name, data in brand_groups.items():
+            if is_rex_specs_brand(b_name):
+                brand_groups[b_name] = apply_rex_specs_pricing_to_group(data)
+
         raw_order_total = sum(data["raw_wholesale_total"] for data in brand_groups.values())
         shopping_credit_used = min(int(max(0, shopping_credit_used)), int(max(0, raw_order_total)))
         brand_groups = distribute_credit_by_brand(brand_groups, shopping_credit_used)
@@ -1371,6 +1439,17 @@ def main_app(user):
         grand_total_tax = 0
 
         for b_name, data in brand_groups.items():
+            if is_rex_specs_brand(b_name):
+                threshold_total = data.get('threshold_total_after_credit', data['raw_wholesale_total'])
+                data['is_wholesale_qualified'] = True
+                data['is_shipping_qualified'] = threshold_total >= 10000
+                if data['is_shipping_qualified']:
+                    is_order_free_shipping = True
+                brand_subtotal = data['raw_wholesale_total']
+                grand_total_subtotal += brand_subtotal
+                grand_total_tax += int(round(brand_subtotal * TAX_RATE))
+                continue
+
             safe_default = {"wholesale_threshold": 10000, "shipping_threshold": 10000, "discount_rate": 0.7}
             rule = BRAND_RULES.get(b_name, BRAND_RULES.get("default", safe_default))
             d_rate = rule.get('discount_rate', 0.7)
@@ -3616,6 +3695,10 @@ def main_app(user):
                     brand_groups[b_name]['items'].append(item)
                     brand_groups[b_name]['raw_wholesale_total'] += int(round(item['wholesale_price'] * item['qty']))
 
+                for b_name, data in brand_groups.items():
+                    if is_rex_specs_brand(b_name):
+                        brand_groups[b_name] = apply_rex_specs_pricing_to_group(data)
+
                 is_editing = st.session_state.get('editing_order_id') is not None
                 default_discount = 0
                 if is_editing:
@@ -3651,6 +3734,17 @@ def main_app(user):
                 grand_total_tax = 0
                 
                 for b_name, data in brand_groups.items():
+                    if is_rex_specs_brand(b_name):
+                        threshold_total = data.get('threshold_total_after_credit', data['raw_wholesale_total'])
+                        data['is_wholesale_qualified'] = True
+                        data['is_shipping_qualified'] = threshold_total >= 10000
+                        if data['is_shipping_qualified']:
+                            is_order_free_shipping = True
+                        brand_subtotal = data['raw_wholesale_total']
+                        grand_total_subtotal += brand_subtotal
+                        grand_total_tax += int(round(brand_subtotal * TAX_RATE))
+                        continue
+
                     safe_default = {"wholesale_threshold": 10000, "shipping_threshold": 10000, "discount_rate": 0.7}
                     rule = BRAND_RULES.get(b_name, BRAND_RULES.get("default", safe_default))
                     d_rate = rule.get('discount_rate', 0.7)
@@ -3682,42 +3776,63 @@ def main_app(user):
                         item['final_subtotal'] = item['final_unit_price'] * item['qty']
 
                 for b_name, data in brand_groups.items():
-                    safe_default = {"wholesale_threshold": 10000, "shipping_threshold": 10000, "discount_rate": 0.7}
-                    rule = BRAND_RULES.get(b_name, BRAND_RULES.get("default", safe_default))
-                    d_rate = rule.get('discount_rate', 0.7)
-                    w_threshold = rule.get('wholesale_threshold', 10000)
-                    s_threshold = rule.get('shipping_threshold', 10000)
-                    threshold_total = data.get('threshold_total_after_credit', data['raw_wholesale_total'])
-                    credit_allocated = int(data.get('shopping_credit_allocated', 0))
-                    wholesale_remaining = max(0, int(w_threshold) - int(threshold_total))
-                    shipping_remaining = max(0, int(s_threshold) - int(threshold_total))
-                    is_nonstop = str(b_name).strip().lower() == "non-stop dogwear"
-                    
-                    if data['is_wholesale_qualified']:
-                        title = f"{escape_html(b_name)} | 已達批發門檻"
+                    if is_rex_specs_brand(b_name):
+                        threshold_total = data.get('threshold_total_after_credit', data['raw_wholesale_total'])
+                        credit_allocated = int(data.get('shopping_credit_allocated', 0))
+                        shipping_remaining = max(0, 10000 - int(threshold_total))
                         if data['is_shipping_qualified']:
+                            title = f"{escape_html(b_name)} | Rex Specs 批價已套用"
                             meta = f"門檻金額 ${threshold_total:,} | 已免運"
+                            card_type = "ok"
                         else:
+                            title = f"{escape_html(b_name)} | Rex Specs 批價已套用"
                             meta = f"門檻金額 ${threshold_total:,} | 再 ${shipping_remaining:,} 免運"
+                            card_type = "warn"
+                        if data.get("rex_specs_goggle_qty", 0) > 0:
+                            meta += f" | 護目鏡 {int(data['rex_specs_goggle_qty'])} 件單價 ${int(data['rex_specs_goggle_unit_price']):,}"
                         if credit_allocated > 0:
                             meta += f" | 已扣購物金 ${credit_allocated:,}"
                         st.markdown(
-                            f"<div class='threshold-card ok'><div class='threshold-title'>{title}</div><div class='threshold-meta'>{escape_html(meta)}</div></div>",
+                            f"<div class='threshold-card {card_type}'><div class='threshold-title'>{title}</div><div class='threshold-meta'>{escape_html(meta)}</div></div>",
                             unsafe_allow_html=True
                         )
                     else:
-                        if is_nonstop:
-                            title = f"{escape_html(b_name)} | 未達批發門檻"
-                            meta = f"目前零售 {int(d_rate * 10)} 折 | 再 ${wholesale_remaining:,} 達批發"
+                        safe_default = {"wholesale_threshold": 10000, "shipping_threshold": 10000, "discount_rate": 0.7}
+                        rule = BRAND_RULES.get(b_name, BRAND_RULES.get("default", safe_default))
+                        d_rate = rule.get('discount_rate', 0.7)
+                        w_threshold = rule.get('wholesale_threshold', 10000)
+                        s_threshold = rule.get('shipping_threshold', 10000)
+                        threshold_total = data.get('threshold_total_after_credit', data['raw_wholesale_total'])
+                        credit_allocated = int(data.get('shopping_credit_allocated', 0))
+                        wholesale_remaining = max(0, int(w_threshold) - int(threshold_total))
+                        shipping_remaining = max(0, int(s_threshold) - int(threshold_total))
+                        is_nonstop = str(b_name).strip().lower() == "non-stop dogwear"
+                        
+                        if data['is_wholesale_qualified']:
+                            title = f"{escape_html(b_name)} | 已達批發門檻"
+                            if data['is_shipping_qualified']:
+                                meta = f"門檻金額 ${threshold_total:,} | 已免運"
+                            else:
+                                meta = f"門檻金額 ${threshold_total:,} | 再 ${shipping_remaining:,} 免運"
+                            if credit_allocated > 0:
+                                meta += f" | 已扣購物金 ${credit_allocated:,}"
+                            st.markdown(
+                                f"<div class='threshold-card ok'><div class='threshold-title'>{title}</div><div class='threshold-meta'>{escape_html(meta)}</div></div>",
+                                unsafe_allow_html=True
+                            )
                         else:
-                            title = f"{escape_html(b_name)} | 未達出貨門檻"
-                            meta = f"再 ${wholesale_remaining:,} 可出貨"
-                        if credit_allocated > 0:
-                            meta = f"門檻金額 ${threshold_total:,} | 已扣購物金 ${credit_allocated:,} | {meta}"
-                        st.markdown(
-                            f"<div class='threshold-card warn'><div class='threshold-title'>{title}</div><div class='threshold-meta'>{escape_html(meta)}</div></div>",
-                            unsafe_allow_html=True
-                        )
+                            if is_nonstop:
+                                title = f"{escape_html(b_name)} | 未達批發門檻"
+                                meta = f"目前零售 {int(d_rate * 10)} 折 | 再 ${wholesale_remaining:,} 達批發"
+                            else:
+                                title = f"{escape_html(b_name)} | 未達出貨門檻"
+                                meta = f"再 ${wholesale_remaining:,} 可出貨"
+                            if credit_allocated > 0:
+                                meta = f"門檻金額 ${threshold_total:,} | 已扣購物金 ${credit_allocated:,} | {meta}"
+                            st.markdown(
+                                f"<div class='threshold-card warn'><div class='threshold-title'>{title}</div><div class='threshold-meta'>{escape_html(meta)}</div></div>",
+                                unsafe_allow_html=True
+                            )
 
                     for item in data['items']:
                         c_name, c_qty, c_del, c_price = st.columns([2.05, 1.9, 0.7, 0.85], vertical_alignment="center")
